@@ -267,5 +267,6 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
     var probeScreen: TerminalScreenController? { model.focused?.screen }
     var probeScreens: [Int: TerminalScreenController] { model.panes.mapValues(\.screen) }
     var probeWeb: TerminalWebView? { nil }
+    func probeSimple(_ on: Bool) { model.setSimple(on) }
     #endif
 }

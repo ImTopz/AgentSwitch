@@ -55,6 +55,7 @@ final class MainWindowController: NSObject {
     /// TerminalProbe: the window opens behind the others and the app is not made active.
     static var probing = false
     var probeScreen: TerminalScreenController? { terminals?.probeScreen }
+    func probeSimple(_ on: Bool) { terminals?.probeSimple(on) }
     /// A page is being drawn in from the top right now (the probe's page change).
     var probeRefreshing: Bool { container?.refresh.playing ?? false }
     var probeScreens: [Int: TerminalScreenController] { terminals?.probeScreens ?? [:] }

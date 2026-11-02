@@ -48,6 +48,9 @@ enum PerfProbe {
                 }
                 window = main.window
                 screen?.claim()
+                // `-probeSimple YES`: the terminal's record in the simple view, as a user reading one sees it (a probe
+                // reads no defaults, so the user's own choice of view is not there to follow).
+                if UserDefaults.standard.bool(forKey: "probeSimple") { main.probeSimple(true) }
                 show = { page in main.switchPage(to: page) }
             } else {
                 model.loadDemo()

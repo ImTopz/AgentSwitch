@@ -53,6 +53,8 @@ protocol TerminalsPage: AnyObject {
     var probeScreen: TerminalScreenController? { get }
     var probeScreens: [Int: TerminalScreenController] { get }
     var probeWeb: TerminalWebView? { get }
+    /// The pane in focus in the simple view, or the terminal view (a probe shows a record as the user sees one).
+    func probeSimple(_ on: Bool)
     #endif
 }
 

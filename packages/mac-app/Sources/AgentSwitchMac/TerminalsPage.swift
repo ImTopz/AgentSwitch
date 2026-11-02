@@ -422,6 +422,7 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate, TerminalsPa
     #if DEBUG
     var probeScreen: TerminalScreenController? { screen }
     var probeScreens: [Int: TerminalScreenController] { screens }
+    func probeSimple(_ on: Bool) {}   // the web page has no simple view
     var probeWeb: TerminalWebView? { web }
     #endif
 }

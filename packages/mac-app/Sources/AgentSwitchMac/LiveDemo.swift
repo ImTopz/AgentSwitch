@@ -57,8 +57,15 @@ final class LiveDemoTransport: HTTPTransport, @unchecked Sendable {
                                       "options": ["删掉", "保留"], "answerable": true]))
             }
         }
-        rows.append(row("t1", "task", "修 AgentSwitch 的 bug", "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "Opus 5.5",
+        // `-liveDemoChurn YES`: the work changes its step and its word every five seconds, for as long as it runs — what a
+        // terminal at work does with every tool call — so what each change costs the app can be watched from outside.
+        let churn = UserDefaults.standard.bool(forKey: "liveDemoChurn") ? Int(t / 5) + 2 : 0
+        rows.append(row("t1", "task", "修 AgentSwitch 的 bug", "第 \(max(churn, 2)) 步：运行 npx vitest run tests/projects.test.ts", doing: churn % 2 == 1 ? "Working" : "Run", model: "Opus 5.5",
                         since: start.addingTimeInterval(-640)))
+        if churn > 0 {
+            rows.append(row("k2", "terminal", "AgentSwitch", churn % 2 == 1 ? "Edit host.ts" : "Bash: npm test", doing: churn % 2 == 1 ? "Edit" : "Run", model: "Claude Code", agent: "claude-code",
+                            since: start.addingTimeInterval(-900)))
+        }
         if t < 14 {
             rows.append(row("t2", "task", "整理下载目录", "已交给 DeepSeek Flash", doing: "Start", model: "DeepSeek Flash", since: start.addingTimeInterval(-40)))
         } else {
