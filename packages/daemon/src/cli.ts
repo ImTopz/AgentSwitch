@@ -185,7 +185,7 @@ async function watchInteractive(id: string): Promise<void> {
   }
 }
 
-const USAGE = "usage: serve | engine | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp | pair | devices | nodes [add|remove] | node [run|name|restart] | service | doctor | profiles [new|api|color|rm] | config [page] [--lang l] | console; --on <node>";
+const USAGE = "usage: serve | engine | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp | pair | devices | nodes [add|remove] | node [run|name|restart] | service | doctor | leftovers [end] | profiles [new|api|color|rm] | config [page] [--lang l] | console; --on <node>";
 
 const ago = (ts: number | null): string => {
   if (ts === null) return "never";
@@ -370,6 +370,16 @@ async function main(): Promise<number> {
     }
     case "service": return service(a1, layout());
     case "doctor": return doctor();
+    case "leftovers": {
+      // What the terminals left running (docs/terminal-v0.md §11); `leftovers end` ends them now.
+      const { on, leftovers } = await client.leftovers();
+      if (values.json) { out(leftovers); return 0; }
+      if (!on) console.log("this service does not clean what its terminals leave behind (AGENTSWITCH_LEFTOVERS=0)");
+      if (!leftovers.length) { console.log("nothing left behind"); return 0; }
+      for (const p of leftovers) console.log(`${String(p.pid).padStart(6)}  ${p.terminal}  ${p.elapsed.padStart(11)}  ${String(Math.round(p.rssKb / 1024)).padStart(5)} MB  ${p.cpu.toFixed(1).padStart(5)}%  ${p.command.slice(0, TASK_CHARS)}`);
+      if (a1 === "end") { const { ended } = await client.endLeftovers(); console.log(`ended ${ended.length}`); }
+      return 0;
+    }
     case "profiles": {
       const gate = { bin: layout().gate, home: homes().gateHome };
       return profilesCommand(positionals.slice(1), { api: values.api, baseUrl: values["base-url"], model: values.model, key: values.key, force: values.force, json: values.json, remote: Boolean(values.on) }, {

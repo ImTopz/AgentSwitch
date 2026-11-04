@@ -27,6 +27,8 @@ export type NodeSettings = {
   readonly lan?: string;
   /** Terminals outlive a restart of the service, each on a holder of its own (docs/terminal-v0.md §10); on unless false. */
   readonly holdTerminals?: boolean;
+  /** What a terminal leaves running is ended 30 s after it ended (docs/terminal-v0.md §11); on unless false. */
+  readonly cleanLeftovers?: boolean;
   /** The language `agentswitch config` speaks (docs/tui-v0.md §5.2): `en`, `zh-Hans`, `zh-Hant`, `ja`, `es`. Kept here
    *  because the service's own environment says `C.UTF-8`. */
   readonly language?: string;
@@ -119,6 +121,7 @@ export function plan(input: { env: NodeJS.ProcessEnv; home: string; gateHome: st
     ...(settings.lan?.trim() ? { AGENTSWITCH_LAN: settings.lan.trim() } : {}),
     AGENTSWITCH_EXECUTORS: settings.executors === "echo" ? "echo" : "real",
     AGENTSWITCH_HOLD_TERMINALS: settings.holdTerminals === false ? "0" : "1",
+    AGENTSWITCH_LEFTOVERS: settings.cleanLeftovers === false ? "0" : "1",
     // A terminal outliving this runtime runs its hooks and its browser bridge through `current` (daemon.ts `stable`).
     ...(l.runtime ? { AGENTSWITCH_RUNTIME_LINK: join(dirname(l.runtime), "current") } : {}),
     ...(settings.router === "echo" ? { AGENTSWITCH_ROUTER: "echo" } : {}),

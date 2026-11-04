@@ -301,6 +301,10 @@ export type TerminalHostOptions = {
   readonly deviceOf?: (harness: TerminalHarness, profile: string | null) => string | null;
   /** The terminal is forgotten (deleted, or its start failed): what it left goes too (its browser tabs). */
   readonly onRemove?: (id: string) => void;
+  /** The terminal's program is gone (it exited, or the terminal was deleted): what it may have left running is this
+   *  callback's to end after a grace (leftovers.ts, docs/terminal-v0.md §11). Not told for a terminal let go of to
+   *  another daemon, whose program runs on. */
+  readonly onLeft?: (id: string) => void;
   /** Terminals that outlive the service (docs/terminal-v0.md §10): each program on a pty its own holder holds
    *  (held.ts), described in `<dir>/<id>/meta.json`, taken up again by the next daemon (`restore`). Absent: node-pty in
    *  this process, the terminals end with it. */
@@ -944,7 +948,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onSession" | "deviceOf" | "hold">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onLeft" | "onSession" | "deviceOf" | "hold">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -1686,10 +1690,11 @@ export class TerminalHost {
   }
 
   /** Tells the owner of what was made for terminal `id` that its program ended, or (`removed`) that it is gone too. */
-  private ended(id: string, removed: boolean): void {
+  private ended(id: string, removed: boolean, left = true): void {
     try {
       this.opts.onExit?.(id);
       if (removed) this.opts.onRemove?.(id);
+      if (left) this.opts.onLeft?.(id);
     } catch (err) { console.error(`terminals: ending ${id}: ${(err as Error).message}`); }
   }
 
@@ -1776,7 +1781,7 @@ export class TerminalHost {
     this.noSubagents(s);
     this.setStatus(s, "exited");
     s.emit({ type: "exit", code: 129 });
-    this.ended(s.id, false);
+    this.ended(s.id, false, false);
   }
 
   private exited(s: Session, code: number): void {

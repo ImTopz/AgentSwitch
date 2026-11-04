@@ -17,6 +17,7 @@ import { viewerFor } from "./browse.js";
 import type { ElsewhereCheck } from "../terminals/elsewhere.js";
 import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost, CLAUDE_MODES } from "../terminals/host.js";
 import type { TerminalStyle } from "../terminals/style.js";
+import { LEFTOVER_GRACE_MS, type Leftovers } from "../terminals/leftovers.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
@@ -55,6 +56,8 @@ export type Terminals = {
   readonly daybreakTurned?: (on: boolean) => void;
   /** Where a terminal's attached files go (`<dir>/<id>/`); default the system's temporary folder (no spaces). */
   readonly attachDir?: string;
+  /** What the terminals left running (leftovers.ts, docs/terminal-v0.md §11); absent when not cleaned. */
+  readonly leftovers?: Leftovers;
   /** Before an agent starts (Codex: its hooks trusted, codexHooks.ts); whatever happens, the start goes on. */
   readonly prepare?: (harness: TerminalHarness, home?: string) => Promise<unknown>;
   /** The tree's git status (default: `git status` itself, gitStatus.ts). */
@@ -113,6 +116,8 @@ const Decide = z.object({
 });
 const Rename = z.object({ name: z.string().max(200).nullable() });
 const HookBody = z.object({ event: z.string().min(1).max(64), payload: z.record(z.string(), z.unknown()) });
+/** Which leftovers to end now: one terminal's, the pids named, or (neither) all of them. */
+const EndLeftovers = z.object({ terminal: z.string().regex(/^[\w-]{1,64}$/).optional(), pids: z.array(z.number().int().positive()).max(1000).optional() });
 const Raw = z.object({ data: z.string().min(1).max(MAX_INPUT) });
 
 const STATUS: Record<TerminalError["code"], 400 | 403 | 404 | 409> = { not_found: 404, exited: 409, unavailable: 400, forbidden: 403, invalid: 400, busy: 409 };
@@ -323,6 +328,23 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   };
   app.get("/terminals", (c) => c.json({ terminals: host.list().map(shown), agents, ...listing() }));
   app.get("/terminals/style", (c) => c.json(t.style()));
+
+  // What the terminals left running (docs/terminal-v0.md §11): seen and ended from this machine only — a process list
+  // is this machine's business, and a paired phone has no terminal of its own here to have left anything.
+  app.get("/terminals/leftovers", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "leftovers are seen on the machine itself" }, 403);
+    if (!t.leftovers) return c.json({ on: false, leftovers: [] });
+    return c.json({ on: true, graceMs: LEFTOVER_GRACE_MS, leftovers: await t.leftovers.list() });
+  });
+  app.post("/terminals/leftovers/end", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "leftovers are ended on the machine itself" }, 403);
+    const body = await parseBody(c, EndLeftovers);
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    if (!t.leftovers) return c.json({ ended: [] });
+    const ended = await t.leftovers.sweep(body.data.terminal ?? body.data.pids);
+    if (ended.length) audit.record({ terminal: body.data.terminal ?? "*", action: "leftovers", via: via(c), detail: { pids: ended.map((p) => p.pid) } });
+    return c.json({ ended: ended.map((p) => p.pid) });
+  });
 
   const start = async (c: Context, resume: boolean) => {
     const body = resume ? await parseBody(c, ResumeTerminal) : await parseBody(c, NewTerminal);

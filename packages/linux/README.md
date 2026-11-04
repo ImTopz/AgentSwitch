@@ -34,7 +34,9 @@ The terminals outlive the restart (`docs/terminal-v0.md` §10): each program is 
 it up again — the agent, its screen, its hooks and its browser tool go on. Dispatch's tasks do not outlive it: while
 one is in progress the update waits, up to 30 minutes, then goes back without restarting; `install.sh --now` does not
 wait. `agentswitch service stop` and `uninstall` end the terminals too; `restart` does not. `"holdTerminals": false` in
-node.json turns holding off.
+node.json turns holding off. What a terminal leaves running after it ended (`nohup … &`, a job in the
+background) is ended 30 s later, and whatever an earlier service's terminals left is ended once this one has its own
+terminals back (`agentswitch leftovers` lists it, `leftovers end` ends it now); `"cleanLeftovers": false` turns that off.
 
 From a terminal that is not held (one opened before an update brought holding, or with holding off) the restart would
 end the script with that terminal; it says so and leaves the restart, the check and the way back to a unit of its own

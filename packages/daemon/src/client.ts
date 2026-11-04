@@ -3,6 +3,7 @@
 import type { EngineStatus, EngineUpdateRequest } from "./browser/engine/kit.js";
 import type { Approval, Task, TaskEvent } from "./engine/types.js";
 import type { AgentProfiles, Profile, ProfileAgent, ProfileKind } from "./profiles/store.js";
+import type { Leftover } from "./terminals/leftovers.js";
 import type { ModelProbe } from "./profiles/apiKeys.js";
 import type { ModelSettings } from "./router/modelOverlay.js";
 import type { DiscoveredSkill, McpServer, Skill } from "./extensions/types.js";
@@ -62,6 +63,9 @@ export class Client {
   revokeDevice(id: string) { return this.call<{ ok: true }>("DELETE", `/devices/${encodeURIComponent(id)}`); }
   /** docs/profiles-v0.md: every agent's profiles; one made (an API key a ciphertext, §3.6), changed, removed. */
   profiles() { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("GET", "/profiles"); }
+  /** What the terminals left running (docs/terminal-v0.md §11); `on` false: this service does not clean them. */
+  leftovers() { return this.call<{ on: boolean; graceMs?: number; leftovers: Leftover[] }>("GET", "/terminals/leftovers"); }
+  endLeftovers(what: { terminal?: string; pids?: number[] } = {}) { return this.call<{ ended: number[] }>("POST", "/terminals/leftovers/end", what); }
   /** The models an address offers for a key (a ciphertext just sealed for it, or the one `profile` keeps), or what it said instead. */
   profileModels(agent: ProfileAgent, ask: { baseUrl?: string; key?: string; profile?: string }) { return this.call<ModelProbe>("POST", "/profiles/models", { agent, ...ask }); }
   createProfile(agent: ProfileAgent, name: string, kind: ProfileKind, api?: { key: string; baseUrl?: string; model?: string; force?: boolean }) {

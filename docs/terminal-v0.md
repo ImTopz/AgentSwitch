@@ -441,3 +441,19 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 - `BOUNDARY.md` 补“熬过重启的终端”一节，并改了会话令牌、转发口口令、API key 三条。
 - 仍待做：`install.sh` 切换 `current` 之后才等 Dispatch 的任务，其间被持有的终端用新运行时的 hook 程序对着旧 daemon（版本不符的窗口；等完再切更好）；`MemoryMax`；Mac 的 ⌘Q 两项选择。
 
+## 11. 遗留进程：终端结束后它起的东西
+
+终端的程序结束时（自己退出、被结束、被删除），服务只向它的进程组发 `SIGHUP`、3 秒后 `SIGKILL`。agent 用 `nohup … &`、`setsid`、后台任务起的进程不在那个进程组里，就留了下来，过继给 launchd，照旧占 CPU 和内存；应用或服务重启时同理（2026-11-04，用户：有的时候 session 死了但是工具还在跑会形成一些僵尸进程一直占用 cpu 和内存）。严格说它们是孤儿进程，不是僵尸进程。
+
+**把手**：终端里起的每个进程都从它继承 `AGENTSWITCH_TERMINAL_ID` 和 `AGENTSWITCH_TERMINAL_URL`。不管过继到哪，只要没清空环境，macOS 的 `ps -E`（Linux 读 `/proc/<pid>/environ`）都能按终端归类。带着本服务地址、而那个终端已不在运行的，就是遗留进程。
+
+**做法（已做，`packages/daemon/src/terminals/leftovers.ts`）**：
+
+- 终端的程序结束或终端被删除后 **30 秒**（`LEFTOVER_GRACE_MS`），把还带着它 id 的进程 `SIGTERM`，3 秒后还在的 `SIGKILL`（`TerminalHost` 的 `onLeft`）。被另一个 daemon 接走的终端（§10 的交接）不算结束，不清。
+- 服务启动后——等自己的终端都接回了（§10）——以及之后每分钟，把所有遗留进程按同样方式处理：覆盖应用崩溃、换版、服务重启。
+- **不留口子**（用户，2026-11-04）：没有白名单。要在终端结束后继续跑的东西，另开一个终端或交给 launchd / systemd。
+- 只认带着**本服务地址**（`http://127.0.0.1:<本机口>`）的进程：同一台机器上另一个服务（测试、开发副本）的终端各管各的。本进程和它的父进程不碰。
+- 接口（只在本机，配对设备 403）：`GET /terminals/leftovers` → `{on, graceMs, leftovers: [{pid, ppid, pgid, terminal, elapsed, cpu, rssKb, command}]}`；`POST /terminals/leftovers/end {terminal?} | {pids?}`（都不给就全部）→ `{ended: [pid]}`，进终端审计（`action: "leftovers"`）。命令行 `agentswitch leftovers [end]`。
+- 开关：环境变量 `AGENTSWITCH_LEFTOVERS=0` 关；Linux 节点 `node.json` 写 `"cleanLeftovers": false`。默认开。测试建的 daemon 不带这项（它会读机器的进程表）。
+- 边界：`env -i` 起的、交给 launchd 的进程找不到；Linux 节点上更干净的是停掉终端自己的 systemd scope（§10），cgroup 里的一切都结束，不依赖环境变量——下一步。Dispatch 的执行器不在这一节里。
+- 测试 `tests/leftovers.test.ts`：`ps -E` 一行的解析、Linux 的 environ 解析；宽限到了只结束那个终端的、还在跑的终端和别的服务的不碰、`SIGTERM` 后还在的补 `SIGKILL`；接口对配对设备 403。

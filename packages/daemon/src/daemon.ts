@@ -104,6 +104,7 @@ import { holding } from "./terminals/held.js";
 import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
 import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
 import { endLeftHeld, TERMINAL_HARNESSES } from "./terminals/host.js";
+import { Leftovers } from "./terminals/leftovers.js";
 import { BRIDGE_SCRIPT, bridgeCommand, terminalOwner, type AgentEngine } from "./browser/agents.js";
 import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
@@ -168,6 +169,9 @@ export type DaemonConfig = {
   readonly browserWindow?: boolean;
   /** Terminals outlive the service on holders of their own (docs/terminal-v0.md §10). */
   readonly holdTerminals?: boolean;
+  /** What a terminal leaves running after it ended is ended after a grace (docs/terminal-v0.md §11); on unless
+   *  AGENTSWITCH_LEFTOVERS=0. Tests build with it off: a sweep reads the machine's process table. */
+  readonly leftovers?: boolean;
 };
 
 /** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
@@ -213,6 +217,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     // docs/terminal-v0.md §10: each terminal's program on a pty its own holder holds, so that it outlives the service
     // (the Linux node's keeper turns it on; node.json `"holdTerminals": false` turns it off).
     holdTerminals: env.AGENTSWITCH_HOLD_TERMINALS === "1",
+    leftovers: env.AGENTSWITCH_LEFTOVERS !== "0",
     browserHost: env.AGENTSWITCH_BROWSER_HOST !== "0",
     // docs/browser-v0.md §7.2: Camoufox's tabs have windows of their own on a Mac; `AGENTSWITCH_BROWSER_WINDOW=0`
     // (throw-away services, a Mac nobody sits at) and every other system keep it without one.
@@ -235,6 +240,8 @@ export type Daemon = {
   readonly targets: Targets;
   /** AgentSwitch's own terminals (docs/terminal-v0.md), or null when off. */
   readonly terminals: TerminalHost | null;
+  /** What the terminals leave running after they ended (docs/terminal-v0.md §11), or null when not cleaned. */
+  readonly leftovers: Leftovers | null;
   /** The Mac's own sessions as they are watched (docs/control-v0.md §3), or null when off. */
   readonly sessions: SessionMonitor | null;
   /** The shared browser (docs/browser-v0.md), or null when off. */
@@ -446,6 +453,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // Terminals that outlive the service (docs/terminal-v0.md §10): each program on a holder of its own.
   const held = cfg.holdTerminals && (cfg.terminals || overrides.terminalLauncher) ? holding({ ringBytes: TERMINAL_RING_BYTES }) : null;
   if (cfg.holdTerminals && !held) console.error("terminals: no holder (native/build/pty-hold) — terminals end with the service");
+  let leftovers: Leftovers | null = null;
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
@@ -466,6 +474,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       // Whatever the permission mode.
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
       ...(agents ? { onExit: (id: string) => agents.end({ kind: "terminal", id }), onRemove: (id: string) => agents.end({ kind: "terminal", id }, true) } : {}),
+      // What its program leaves running is ended after a grace (docs/terminal-v0.md §11).
+      onLeft: (id: string) => leftovers?.ended(id),
       ...(held ? { hold: {
         holding: held,
         dir: join(cfg.home, "terminals"),
@@ -489,9 +499,15 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       } } : {}),
     })
     : null;
+  // The processes a terminal left running (docs/terminal-v0.md §11): this service's are the ones tagged with its
+  // address; a terminal's are left once its program is not running.
+  if (terminalHost && cfg.leftovers) {
+    leftovers = new Leftovers({ url: () => `http://127.0.0.1:${localPort}`, live: () => new Set(terminalHost.list().filter((t) => t.status !== "exited").map((t) => t.id)), log: (line) => console.error(line) });
+  }
   let style: TerminalStyle | null = null;
   const terminals = terminalHost ? {
     host: terminalHost,
+    ...(leftovers ? { leftovers } : {}),
     audit: new TerminalAudit(join(cfg.home, "terminals", "audit.jsonl")),
     agents: overrides.terminalLauncher ? [...TERMINAL_HARNESSES] : TERMINAL_HARNESSES.filter((h) => agentBinaries[h]),
     // Claude Code and Codex say themselves whether they are signed in, in a profile's folder (terminals/signIn.ts).
@@ -557,9 +573,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   nodesMade = nodes;
   const fileScopes = { get: (id: string) => scopeOf(cfg.home, id), set: (id: string, scope: Parameters<typeof setScope>[2]) => setScope(cfg.home, id, scope) };
   const app = mountNodes(mountRemoteAdmin(new Hono().route("/", api), { store, remote, onRevoke: (id) => nodes.inboundGone(id), fileScopes }), { nodes, home: cfg.home });
-  return { app, api, remote, nodes, engine, store, quota, targets, clash, terminals: terminalHost, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
+  return { app, api, remote, nodes, engine, store, quota, targets, clash, terminals: terminalHost, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
     stopBrowser: async () => { await profileBrowsers?.stop(); await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
-    close: () => { nodes.close(); thumbnails.close(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+    close: () => { nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml
@@ -712,8 +728,12 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
     daemon.setLocalPort(info.port);
     // Terminals the last daemon left to their holders (docs/terminal-v0.md §10): their hooks reach this port. A daemon
     // that holds none ends them: a terminal nobody takes up is not left running on its own.
-    if (daemon.terminals && !daemon.terminals.holds) void endLeftHeld(join(cfg.home, "terminals")).then((n: number) => { if (n) console.error(`terminals: ${n} left held by the last daemon, ended`); });
-    else void daemon.terminals?.restore().then((n) => { if (n) console.error(`terminals: ${n} taken up again from their holders`); }, (err: Error) => console.error(`terminals: restore: ${err.message}`));
+    const taken: Promise<unknown> = daemon.terminals && !daemon.terminals.holds
+      ? endLeftHeld(join(cfg.home, "terminals")).then((n: number) => { if (n) console.error(`terminals: ${n} left held by the last daemon, ended`); })
+      : daemon.terminals?.restore().then((n) => { if (n) console.error(`terminals: ${n} taken up again from their holders`); }, (err: Error) => console.error(`terminals: restore: ${err.message}`)) ?? Promise.resolve();
+    // What the last daemon's terminals left running is looked for once this daemon's own terminals are all known
+    // (docs/terminal-v0.md §11): a held terminal taken up again has left nothing.
+    void taken.finally(() => daemon.leftovers?.start());
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   }, auth);
   void daemon.quota.refresh();
