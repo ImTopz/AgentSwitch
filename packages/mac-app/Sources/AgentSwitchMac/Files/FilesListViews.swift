@@ -139,6 +139,8 @@ private struct FilesRowMenu: View {
             }
             Divider()
             if files.local { Button("Show in Finder") { files.showInFinder(paths) } }
+            // Another node's file onto this Mac (docs/files-v0.md §13); this Mac's are here already.
+            if !files.local, !entry.isFolder { Button("Download") { files.download(paths) } }
             Button("Copy Path") { files.copyPaths(paths) }
             if files.relativeAvailable(paths) { Button("Copy Relative Path") { files.copyPaths(paths, relative: true) } }
             if entry.isFolder { Button("New Terminal Here") { files.newTerminal(entry.kind == .link ? entry.link?.target ?? path : path) } }

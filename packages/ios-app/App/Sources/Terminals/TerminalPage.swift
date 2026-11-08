@@ -95,6 +95,8 @@ struct TerminalPage: View {
         Group {
             if simple {
                 TerminalRecordView(page: page, record: record, terminal: listed, git: model.terminals.git[workdir]?.said, verbose: verbose) { show(.terminal) }
+                    // An answer's file: this page's Files browser over it, the file's preview on top (§5.16).
+                    .environment(\.openMacFile) { file in browsing = MacBrowse(start: file.folder, file: file.path) }
                     .recordTextSize(textStep)
             } else {
                 screen

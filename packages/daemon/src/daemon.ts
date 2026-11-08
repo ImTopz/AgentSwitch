@@ -545,7 +545,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const thumbnails = new Thumbnails();
   const fileAccess: FileAccess = {
     home: process.env.HOME ?? homedir(), denied: prot, thumbnails, audit: new FileAudit(join(cfg.home, "files", "audit.jsonl")),
-    remote: () => { const m = loadMesh(cfg.home); return { on: m.files, changes: m.changes, scopeOf: (id: string) => m.scopes[id] ?? DEFAULT_SCOPE }; },
+    remote: () => { const m = loadMesh(cfg.home); return { on: m.files, changes: m.changes, scopeOf: (id: string) => m.scopes[id] ?? DEFAULT_SCOPE, platformOf: (id: string) => store.getDevice(id)?.platform }; },
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };

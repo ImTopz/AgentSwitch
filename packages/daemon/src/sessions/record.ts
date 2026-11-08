@@ -38,11 +38,16 @@ export type RecordItem =
   // that does not know the mark shows it as an answer, which is how the agents' own apps show it).
   // `questions`: what it asks at the end of the message, each with the answers it offers (Codex): to answer is to
   // send one as your reply.
-  | { readonly type: "answer"; readonly id: string; readonly ts: number; readonly text: string; readonly clipped?: boolean; readonly thinking?: boolean; readonly questions?: readonly RecordQuestion[] }
+  // `files`: the files the message points at, taken out of its text (Codex's file citations): a screen shows each as a
+  // file to open.
+  | { readonly type: "answer"; readonly id: string; readonly ts: number; readonly text: string; readonly clipped?: boolean; readonly thinking?: boolean; readonly questions?: readonly RecordQuestion[]; readonly files?: readonly RecordFile[] }
   | { readonly type: "work"; readonly id: string; readonly ts: number; readonly secs: number; readonly steps: readonly RecordStep[] }
   | { readonly type: "note"; readonly id: string; readonly ts: number; readonly text: string };
 
 export type RecordQuestion = { readonly title: string; readonly options: readonly string[] };
+/** A file an answer points at: its whole path on the node, and what kind of thing it is in the agent's word
+ *  (`workbook`, `document`…) when it says. */
+export type RecordFile = { readonly path: string; readonly kind?: string };
 export type PlanEntry = { readonly text: string; readonly state: "todo" | "doing" | "done" };
 /** `used`: tokens in the context at the last turn; `window`: how many it holds, when the record says. */
 export type RecordUsage = { readonly model?: string; readonly used?: number; readonly window?: number; /** How hard it thought at the last turn, in the agent's word. */ readonly effort?: string };
@@ -121,7 +126,7 @@ type Step = { kind: StepKind; text: string; tool?: string; note?: string; out?: 
   shots?: { at: number; id: string } | { file: string } };
 type Built =
   | { type: "user"; at: number; ts: number; text: string; images: number; queued?: boolean; from?: string }
-  | { type: "answer"; at: number; ts: number; text: string; thinking?: boolean; questions?: readonly RecordQuestion[] }
+  | { type: "answer"; at: number; ts: number; text: string; thinking?: boolean; questions?: readonly RecordQuestion[]; files?: RecordFile[] }
   | { type: "work"; at: number; ts: number; end: number; steps: Step[] }
   | { type: "note"; at: number; ts: number; text: string };
 
@@ -137,15 +142,20 @@ class Builder {
     this.items.push({ type: "user", at, ts, text, images, ...(queued ? { queued } : {}), ...(from !== undefined ? { from } : {}) });
   }
 
-  /** The agent's words. A run of work before them ends when they come. `thinking`: what it thought on the way. */
-  answer(at: number, ts: number, text: string, thinking = false, questions: readonly RecordQuestion[] = []): void {
+  /** The agent's words. A run of work before them ends when they come. `thinking`: what it thought on the way.
+   *  `files`: the files the words point at, taken out of them. */
+  answer(at: number, ts: number, text: string, thinking = false, questions: readonly RecordQuestion[] = [], files: readonly RecordFile[] = []): void {
     this.close(ts);
     const last = this.items[this.items.length - 1];
-    if (questions.length) { this.items.push({ type: "answer", at, ts, text, questions }); return; }
+    if (questions.length) { this.items.push({ type: "answer", at, ts, text, questions, ...(files.length ? { files: [...files] } : {}) }); return; }
     // One answer written as several lines in a row (Claude Code writes a line per block) reads as one; a thought and
     // an answer stay two.
-    if (last?.type === "answer" && !last.questions && !last.thinking === !thinking && ts - last.ts < 2000 && last.at !== at) { last.text = `${last.text}\n\n${text}`; return; }
-    this.items.push({ type: "answer", at, ts, text, ...(thinking ? { thinking } : {}) });
+    if (last?.type === "answer" && !last.questions && !last.thinking === !thinking && ts - last.ts < 2000 && last.at !== at) {
+      last.text = [last.text, text].filter(Boolean).join("\n\n");
+      if (files.length) last.files = [...(last.files ?? []), ...files.filter((f) => !last.files?.some((had) => had.path === f.path))];
+      return;
+    }
+    this.items.push({ type: "answer", at, ts, text, ...(thinking ? { thinking } : {}), ...(files.length ? { files: [...files] } : {}) });
   }
 
   note(at: number, ts: number, text: string): void {
@@ -447,6 +457,24 @@ function codexQuestions(questions: unknown): RecordQuestion[] {
   })).filter((q) => q.title || q.options.length).slice(0, 6);
 }
 
+/** Codex's file citations, taken out of a message's text (Codex 0.163: a message that made a file writes
+ *  `:codex-file-citation{path="/…/x.xlsx" purpose="output" artifact_kind="workbook"}` into its text — a Markdown
+ *  directive its own app draws as a file card, which a screen that does not know it shows as is; 2026-11-08, the user's
+ *  picture of one on the phone). Each is a file of the answer, by its path (the same path once), with the kind it names;
+ *  what is left of the text loses the blank lines they stood on. */
+const CITATION = /:codex-file-citation\{([^}]*)\}/g;
+export function codexCitations(text: string): { text: string; files: RecordFile[] } {
+  const files: RecordFile[] = [];
+  const stripped = text.replace(CITATION, (_whole, attrs: string) => {
+    const read = (name: string): string => { const m = new RegExp(`(?:^|\\s)${name}="([^"]*)"`).exec(attrs); return m?.[1]?.trim() ?? ""; };
+    const path = read("path");
+    if (path.startsWith("/") && !files.some((f) => f.path === path)) { const kind = read("artifact_kind"); files.push({ path, ...(kind ? { kind } : {}) }); }
+    return "";
+  });
+  if (!files.length && stripped === text) return { text, files };
+  return { text: stripped.split("\n").map((l) => l.trimEnd()).join("\n").replace(/\n{3,}/g, "\n\n").trim(), files };
+}
+
 /** One file of a Codex change: added whole, deleted whole, or a unified diff. */
 function codexPatch(path: string, change: Json, cwd: string): Patch {
   const kind = str(change.type);
@@ -470,10 +498,11 @@ function codexItem(b: Builder, at: number, ts: number, payload: Json, cwd: strin
       return;
     }
     case "AgentMessage": {
-      const text = texts(item.content), questions = codexQuestions(item.questions);
+      const { text, files } = codexCitations(texts(item.content));
+      const questions = codexQuestions(item.questions);
       // A question the message does not already say is written out with it.
       const said = [text, ...questions.map((q) => q.title).filter((title) => title && !text.includes(title))].filter(Boolean).join("\n\n");
-      if (said || questions.length) b.answer(at, ended, said, false, questions);
+      if (said || questions.length || files.length) b.answer(at, ended, said, false, questions, files);
       return;
     }
     case "Reasoning": { const text = texts(item.summary_text); if (text) b.answer(at, ended, text, true); return; }
@@ -580,7 +609,7 @@ function shown(it: Built, id: string): RecordItem {
   const long = (text: string) => (text.length > TEXT_CHARS ? { text: text.slice(0, TEXT_CHARS), clipped: true as const } : { text });
   switch (it.type) {
     case "user": return { type: "user", id, ts: it.ts, ...long(it.text), ...(it.images ? { images: it.images } : {}), ...(it.queued ? { queued: true } : {}), ...(it.from !== undefined ? { from: it.from } : {}) };
-    case "answer": return { type: "answer", id, ts: it.ts, ...long(it.text), ...(it.thinking ? { thinking: true } : {}), ...(it.questions?.length ? { questions: it.questions } : {}) };
+    case "answer": return { type: "answer", id, ts: it.ts, ...long(it.text), ...(it.thinking ? { thinking: true } : {}), ...(it.questions?.length ? { questions: it.questions } : {}), ...(it.files?.length ? { files: it.files } : {}) };
     case "note": return { type: "note", id, ts: it.ts, text: it.text };
     case "work": return {
       type: "work", id, ts: it.ts, secs: Math.max(0, Math.round((it.end - it.ts) / 1000)),

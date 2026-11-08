@@ -78,12 +78,17 @@ private struct PeerRow: View {
 private struct AnswerRow: View {
     let item: RecordItem
     @State private var whole = false
+    @Environment(AppModel.self) private var model
+    @Environment(\.openMacFile) private var openMacFile
 
     var body: some View {
         let head = whole ? nil : RecordDisplay.preview(item.text)
         VStack(alignment: .leading, spacing: 8) {
             // What it thought on the way reads quieter than what it has to say to you.
-            MarkdownView(text: head ?? item.text).textSelection(.enabled).linkMenu(for: item.text).opacity(item.thinking ? 0.62 : 1)
+            if !item.text.isEmpty {
+                MarkdownView(text: head ?? item.text).textSelection(.enabled).linkMenu(for: item.text).opacity(item.thinking ? 0.62 : 1)
+            }
+            if !item.files.isEmpty { RecordFileChips(files: item.files) { file in (openMacFile ?? { model.showInFiles($0.folder) })(file) } }
             if head != nil {
                 Button { whole = true } label: { Text("Show More").mono(13, weight: .medium) }
                     .buttonStyle(.plain).foregroundStyle(Theme.signal)
@@ -507,6 +512,51 @@ struct TasksRow: View {
         } else {
             Text(state == .done ? "[x]" : state == .doing ? "[>]" : "[ ]").mono(12)
                 .foregroundStyle(state == .doing ? Theme.busy : state == .done ? Theme.done : Color.secondary)
+        }
+    }
+}
+
+/// Where an answer's file opens (docs/simple-view-v0.md §5.16): the terminal page lays its Files browser over itself
+/// with the file's preview on top; elsewhere (a past session's page) the Files tab goes to its folder.
+struct OpenMacFileKey: EnvironmentKey {
+    static let defaultValue: (@MainActor @Sendable (RecordFile) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var openMacFile: (@MainActor @Sendable (RecordFile) -> Void)? {
+        get { self[OpenMacFileKey.self] }
+        set { self[OpenMacFileKey.self] = newValue }
+    }
+}
+
+/// The files an answer points at (Codex's file citations): each a chip — a sheet, its name, its kind in the agent's
+/// word — a tap opening it; a long press copies its path.
+private struct RecordFileChips: View {
+    let files: [RecordFile]
+    let open: (RecordFile) -> Void
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(files) { file in
+                Button { open(file) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc").font(.system(size: 12))
+                        Text(file.name).lineLimit(1).truncationMode(.middle)
+                        if let kind = file.kindWord { Text(kind).foregroundStyle(.secondary) }
+                    }
+                    .mono(12)
+                    .foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).stroke(Theme.line, lineWidth: look.isClassic ? 0 : 1))
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Show in Files", systemImage: "folder") { open(file) }
+                    Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = file.path }
+                }
+            }
         }
     }
 }

@@ -443,4 +443,17 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(SessionRecord.withNotices(items: items, notices: [notice(1_000)]).map(\.id), ["notice-n1000", "u", "a"])
         XCTAssertEqual(SessionRecord.withNotices(items: items, notices: [notice(9_000)]).map(\.id), ["u", "a", "notice-n9000"])
     }
+
+    /// 2026-11-08, user's picture of `:codex-file-citation{…}` shown as is on the phone: the service takes a citation
+    /// out of the text and names the file; the screen shows it as a file to open.
+    func testAnAnswersFiles() throws {
+        let page = #"[{"type":"answer","id":"5","ts":1,"text":"做好了。","files":[{"path":"/Users/you/out/cyber_alive_oauth_65.xlsx","kind":"workbook"},{"path":"/Users/you/notes.md"}]},{"type":"answer","id":"9","ts":2,"text":"没有文件。"}]"#
+        let items = try JSONDecoder().decode([RecordItem].self, from: Data(page.utf8))
+        XCTAssertEqual(items[0].files.map(\.name), ["cyber_alive_oauth_65.xlsx", "notes.md"])
+        XCTAssertEqual(items[0].files.map(\.folder), ["/Users/you/out", "/Users/you"])
+        XCTAssertEqual(items[0].files.map(\.kindWord), ["Workbook", nil])
+        XCTAssertEqual(RecordFile(path: "/a/b.py", kind: "source_code").kindWord, "Source Code")
+        XCTAssertEqual(RecordFile(path: "/a/b.py", kind: "").kindWord, nil)
+        XCTAssertEqual(items[1].files, [])
+    }
 }

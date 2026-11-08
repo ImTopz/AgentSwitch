@@ -180,6 +180,7 @@ struct TaskPageView: View {
                     }
                     .buttonStyle(.plain)
                     .help(file.path)
+                    .contextMenu { DispatchFileMenu(file: file, taskId: page.taskId, model: model) }
                 }
             }
         }

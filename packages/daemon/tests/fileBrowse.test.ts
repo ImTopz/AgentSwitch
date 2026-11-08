@@ -278,6 +278,17 @@ describe("the routes", () => {
     const refused = await s.get(`/files/content?path=${s.q(big)}`, { remote: true });
     expect(refused.status).toBe(413);
     expect((await s.get(`/files/content?path=${s.q(big)}`, { headers: { range: "bytes=0-9" }, remote: true })).status).toBe(206);
+    // A paired node (a Mac downloading from this one, docs/files-v0.md §13) is given the whole file; a device of no
+    // known platform is taken for a phone.
+    const nodes = served({ remote: () => ({ on: true, scopeOf: () => ({ mode: "home" }), platformOf: (id) => ({ "mac-2": "macos", "box-1": "linux" }[id]) }) });
+    const bigThere = nodes.d.p("Projects/lumen/huge.bin");
+    writeFileSync(bigThere, "");
+    truncateSync(bigThere, MAX_REMOTE_CONTENT + 1);
+    for (const [device, status] of [["mac-2", 200], ["box-1", 200], ["phone-1", 413]] as const) {
+      const whole = await nodes.app.request(`/files/content?path=${s.q(bigThere)}`, { headers: {} }, markRemote({}, { deviceId: device }));
+      expect(whole.status, device).toBe(status);
+      await whole.body?.cancel();
+    }
     const lines = readFileSync(s.auditPath, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(lines).toEqual([
       expect.objectContaining({ device: "phone-1", action: "content", path: file, bytes: 5 }),

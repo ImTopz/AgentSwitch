@@ -12,7 +12,7 @@ import { mountSessions } from "../src/api/sessions.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { watchRecord } from "../src/api/terminals.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
-import { DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, shortPath, STEP_TEXT_CHARS, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
+import { codexCitations, DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, shortPath, STEP_TEXT_CHARS, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
 import { MESSAGE_CHARS } from "../src/sessions/types.js";
 import type { TerminalHost } from "../src/terminals/host.js";
 
@@ -296,7 +296,9 @@ const rollout = [
   x.item(33, { type: "SubAgentActivity", id: "s1", kind: "started", agent_thread_id: "th", agent_path: "root/reviewer" }),
   line({ timestamp: at(34), type: "response_item", payload: { type: "function_call", name: "update_plan", arguments: JSON.stringify({ plan: [{ step: "改重试次数", status: "completed" }, { step: "跑测试", status: "in_progress" }] }) } }),
   line({ timestamp: at(35), type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: 51_000 }, model_context_window: 272_000 } } }),
-  x.item(36, { type: "AgentMessage", id: "a2", phase: "final_answer", content: [{ type: "Text", text: "改成 3 了，但有一个测试没过。" }] }),
+  x.item(36, { type: "AgentMessage", id: "a2", phase: "final_answer", content: [{ type: "Text",
+    // With the file it made, as Codex 0.163 writes it into the text (its app draws a card of it).
+    text: `改成 3 了，但有一个测试没过。\n\n:codex-file-citation{path="${API}/out/retries.xlsx" purpose="output" artifact_kind="workbook"}\n` }] }),
   line({ timestamp: at(40), type: "event_msg", payload: { type: "turn_aborted", reason: "interrupted" } }),
 ];
 
@@ -309,6 +311,12 @@ function codexFile(lines: string[]): string {
 }
 
 describe("a Codex session's record", () => {
+  it("takes Codex's file citations out of a message: each a file of the answer once, the text without the lines they stood on", () => {
+    const cited = `先看这个。\n\n:codex-file-citation{path="/Users/you/out/a.xlsx" purpose="output" artifact_kind="workbook"}\n\n:codex-file-citation{path="/Users/you/out/a.xlsx" purpose="output" artifact_kind="workbook"}\n再看 :codex-file-citation{path="/Users/you/notes.md" purpose="reference"} 这个。\n:codex-file-citation{path="relative/x.md" artifact_kind="document"}`;
+    expect(codexCitations(cited)).toEqual({ text: "先看这个。\n\n再看  这个。", files: [{ path: "/Users/you/out/a.xlsx", kind: "workbook" }, { path: "/Users/you/notes.md" }] });
+    expect(codexCitations("没有引用。\n\n\n还是没有。")).toEqual({ text: "没有引用。\n\n\n还是没有。", files: [] });
+  });
+
   it("is its thread's items: what a command was for when it only looked, each file of a change, the plan and the usage", () => {
     const path = codexFile(rollout);
     const record = readRecord("codex", path, { cwd: API })!;
@@ -326,6 +334,8 @@ describe("a Codex session's record", () => {
       { kind: "web", text: "node retry backoff" },
       { kind: "agent", text: "reviewer" },
     ] });
+    // Its file citation is a file of the answer, not words of it (2026-11-08, the user's picture of one shown as is).
+    expect(record.items[5]).toMatchObject({ type: "answer", text: "改成 3 了，但有一个测试没过。", files: [{ path: `${API}/out/retries.xlsx`, kind: "workbook" }] });
     expect(record.items[6]).toMatchObject({ type: "note", text: "Interrupted" });
     expect(record.plan).toEqual([{ text: "改重试次数", state: "done" }, { text: "跑测试", state: "doing" }]);
     expect(record.usage).toEqual({ model: "gpt-6-luna", effort: "high", used: 51_000, window: 272_000 });

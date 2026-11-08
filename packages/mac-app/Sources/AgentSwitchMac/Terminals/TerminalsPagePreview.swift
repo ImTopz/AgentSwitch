@@ -231,7 +231,9 @@ enum TerminalsPagePreview {
                 RecordStep(kind: .edit, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 12, removed: 1),
                 RecordStep(kind: .edit, text: "docs/agents-v0.md", added: 2, removed: 1),
             ]),
-            RecordItem(id: "300", kind: .answer, at: ago(815), text: "生效了，只是还没有用上：\n\n- 测试版已装好，`codex-beta` 在命令行里可用。\n- 页面顶部有 `Restart Service…`，但你是在下面那一组里选的，看不到它。\n\n已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 [docs/agents-v0.md](docs/agents-v0.md) §8。"),
+            RecordItem(id: "300", kind: .answer, at: ago(815), text: "生效了，只是还没有用上：\n\n- 测试版已装好，`codex-beta` 在命令行里可用。\n- 页面顶部有 `Restart Service…`，但你是在下面那一组里选的，看不到它。\n\n已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 [docs/agents-v0.md](docs/agents-v0.md) §8。",
+                       // The files it points at (docs/simple-view-v0.md §5.16): each a chip under its words.
+                       files: [RecordFile(path: "/Users/you/code/site/out/agents-versions.xlsx", kind: "workbook"), RecordFile(path: "/Users/you/code/site/docs/agents-v0.md")]),
         ] + (compacting ? [RecordItem(id: "350", kind: .note, at: ago(600), text: "Compacted · 899k → 15k")] : []) + [
             RecordItem(id: "400", kind: .user, at: ago(300), text: "delete 应该标红才对"),
             RecordItem(id: "500", kind: .work, at: ago(290), seconds: 38, steps: [

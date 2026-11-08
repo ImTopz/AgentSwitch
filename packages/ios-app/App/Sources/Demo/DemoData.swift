@@ -325,7 +325,7 @@ enum DemoData {
                 - 页面顶部有 `Restart Service…`，但你是在下面那一组里选的，看不到它。
 
                 已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 [docs/agents-v0.md](docs/agents-v0.md) §8。
-                """),
+                """, files: [RecordFile(path: "/Users/you/code/site/out/agents-versions.xlsx", kind: "workbook"), RecordFile(path: "/Users/you/code/site/docs/agents-v0.md")]),
             RecordItem(id: "400", kind: .user, at: ago(300), text: "delete 应该标红才对"),
             RecordItem(id: "500", kind: .work, at: ago(290), seconds: busy ? 0 : 38, steps: [
                 RecordStep(kind: .search, text: "SettingsDeleteButton"),

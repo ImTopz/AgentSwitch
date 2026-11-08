@@ -17,17 +17,21 @@ import type { Running, Trasher } from "../files/change.js";
 import type { Thumbnails } from "../files/thumbnails.js";
 import { versionedJson } from "./shared.js";
 
-/** The most of one file a paired device is given in one answer: a phone's Quick Look of a file (which itself stops at
- *  25 MB), and a file it shares on, to save on the phone (docs/files-v0.md §12.3). */
+/** The most of one file a paired phone is given in one answer: its Quick Look of a file (which itself stops at
+ *  25 MB), and a file it shares on, to save on the phone (docs/files-v0.md §12.3). A paired node (another Mac, a Linux
+ *  node) has no such limit: a Mac's Files column downloads whole files from it (docs/files-v0.md §13). */
 export const MAX_REMOTE_CONTENT = 200 * 1024 * 1024;
+/** The platforms paired nodes name themselves by (nodes/nodes.ts `nodePlatform`); anything else is a phone. */
+const NODE_PLATFORMS = new Set(["macos", "linux"]);
 
 export type FileAccess = {
   /** The user's home folder: where a viewer starts, what `Home Folder` scopes and `~` mean. */
   readonly home: string;
   /** AgentSwitch's own credential places: the executors' read-denied table (executors/protected.ts). */
   readonly denied: ProtectedPaths;
-  /** Whether paired devices may read files here now, may change them (absent: may), and each one's scope. */
-  readonly remote: () => { readonly on: boolean; readonly changes?: boolean; readonly scopeOf: (deviceId: string) => FileScope };
+  /** Whether paired devices may read files here now, may change them (absent: may), each one's scope, and what kind
+   *  of device each is (its platform as it paired; absent or unknown: taken for a phone). */
+  readonly remote: () => { readonly on: boolean; readonly changes?: boolean; readonly scopeOf: (deviceId: string) => FileScope; readonly platformOf?: (deviceId: string) => string | undefined };
   readonly thumbnails?: Thumbnails;
   readonly audit?: FileAudit;
   /** Where what is moved to the Trash goes (files/change.ts `systemTrash` when absent). */
@@ -149,7 +153,8 @@ export function mountBrowse(app: Hono, access: FileAccess): void {
     const range = rangeOf(c.req.header("range"), size);
     if (range === "bad") return c.body(null, 416, { "content-range": `bytes */${size}` });
     const length = range ? range.end - range.start + 1 : size;
-    if (remoteCaller(c.env) && length > MAX_REMOTE_CONTENT) return refuse(c, "too-large", { limit: MAX_REMOTE_CONTENT, size });
+    const caller = remoteCaller(c.env);
+    if (caller && length > MAX_REMOTE_CONTENT && !NODE_PLATFORMS.has(access.remote().platformOf?.(caller.deviceId) ?? "")) return refuse(c, "too-large", { limit: MAX_REMOTE_CONTENT, size });
     const name = basename(a.path);
     const headers: Record<string, string> = {
       ...CONTENT_HEADERS, "content-type": contentType(name), "content-length": String(length), "accept-ranges": "bytes",

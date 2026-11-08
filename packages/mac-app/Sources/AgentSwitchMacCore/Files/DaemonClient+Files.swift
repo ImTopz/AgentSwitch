@@ -33,7 +33,7 @@ extension DaemonClient {
     }
 
     /// `GET /files/content`: the file's bytes, written to `destination` (for Quick Look of a file that is not on this
-    /// Mac). Another node gives a paired device 25 MB at most.
+    /// Mac, and `Download`). Another node gives a phone 200 MB at most, a paired Mac the whole file.
     @discardableResult
     public func downloadFile(path: String, to destination: URL) async throws -> URL {
         let data = try await call("GET", "/files/content?path=\(Self.query(path))", accept: "*/*", timeout: 120)

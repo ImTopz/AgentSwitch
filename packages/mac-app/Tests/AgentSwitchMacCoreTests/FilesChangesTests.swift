@@ -116,6 +116,16 @@ final class FilesChangesTests: XCTestCase {
     func testSaysWhatWasDone() {
         XCTAssertEqual(FilesWords.trashed(["/Users/you/lumen/docs/logo.png"]), "已将“logo.png”移到废纸篓。⌘Z 可放回。")
         XCTAssertEqual(FilesWords.trashed(["/a", "/b", "/c"]), "已将 3 项移到废纸篓。⌘Z 可放回。")
+        // `Download` (docs/files-v0.md §13).
+        XCTAssertEqual(FilesWords.downloading(["/Users/you/out/report.xlsx"]), "正在下载“report.xlsx”…")
+        XCTAssertEqual(FilesWords.downloaded(["/Users/you/Downloads/report.xlsx", "/Users/you/Downloads/b.md"]), "已下载 2 项到“下载”。")
+        XCTAssertEqual(FilesWords.notDownloaded(node: "Mac mini"), "文件超过 Mac mini 给配对设备的上限，未下载。")
+        let folder = URL(fileURLWithPath: "/Users/you/Downloads")
+        let there: Set<String> = ["report.xlsx", "report 2.xlsx", "README", "README 2"]
+        let free = { (name: String) in FilesDownloads.free(in: folder, name: name) { there.contains($0.lastPathComponent) }.lastPathComponent }
+        XCTAssertEqual(free("report.xlsx"), "report 3.xlsx")
+        XCTAssertEqual(free("new.xlsx"), "new.xlsx")
+        XCTAssertEqual(free("README"), "README 3")
         XCTAssertEqual(FilesWords.putBack(["/a/logo.png"]), "已放回“logo.png”。")
         XCTAssertEqual(FilesWords.renamedBack("app.ts"), "已改回“app.ts”。")
         XCTAssertEqual(FilesWords.madeHidden(".env"), "已创建“.env”。它是隐藏文件，可在 ⋯ › Show Hidden Files 中显示。")

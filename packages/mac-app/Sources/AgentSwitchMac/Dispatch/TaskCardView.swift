@@ -170,6 +170,19 @@ struct FileChip: View {
         }
         .buttonStyle(QuietButtonStyle())
         .help(file.path)
+        .contextMenu { DispatchFileMenu(file: file, taskId: taskId, model: model) }
+    }
+}
+
+/// A task file's right click (docs/dispatch-v0.md): `Open` as the click does, `Save As…` to where you choose.
+struct DispatchFileMenu: View {
+    let file: DispatchTaskFile
+    let taskId: String
+    let model: DispatchModel
+
+    var body: some View {
+        Button("Open") { Task { await model.open(file, taskId: taskId) } }
+        Button("Save As…") { model.saveAs(file, taskId: taskId) }
     }
 }
 

@@ -202,6 +202,11 @@ public enum FilesWords {
     public static func lostInTrash(_ path: String) -> String { "找不到“\((path as NSString).lastPathComponent)”在废纸篓中的位置，未放回。可在废纸篓中手动放回。" }
     public static func madeHidden(_ name: String) -> String { "已创建“\(name)”。它是隐藏文件，可在 ⋯ › Show Hidden Files 中显示。" }
 
+    // `Download` (docs/files-v0.md §13): while another node's files come, once they are in Downloads, and why not.
+    public static func downloading(_ paths: [String]) -> String { "正在下载\(named(paths))…" }
+    public static func downloaded(_ paths: [String]) -> String { "已下载\(named(paths))到“下载”。" }
+    public static func notDownloaded(node: String) -> String { "文件超过 \(node) 给配对设备的上限，未下载。" }
+
     /// The question before a folder a terminal runs in is renamed or moved.
     public static func inUse(terminal: String, renaming: Bool) -> String {
         "终端“\(terminal)”正在此文件夹中运行。\(renaming ? "改名后" : "移到废纸篓后")，其中的 agent 仍会使用原来的路径，可能出错。"

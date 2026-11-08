@@ -212,6 +212,14 @@ final class FilesColumn {
         if active { watch() }
     }
 
+    /// A file named elsewhere (an answer's file, docs/simple-view-v0.md §5.16): the column open at its folder with the
+    /// file selected, so its preview shows and `Open`, `Download` and the rest are a right click away.
+    func show(file path: String) {
+        guard let folder = FilesPath.parent(of: path) else { return show(folder: nil) }
+        show(folder: folder)
+        Task { await reveal(path, reading: folder) }
+    }
+
     /// The list takes the keyboard (a row clicked): its keys, and Quick Look's panel, go through it.
     func focusKeys() {
         guard let keys, let window = keys.window, window.firstResponder !== keys else { return }
@@ -478,6 +486,34 @@ final class FilesColumn {
     }
 
     func openSelection() { for path in selection { open(path) } }
+
+    /// `Download` (docs/files-v0.md §13): another node's files into this Mac's Downloads folder, as a browser saves —
+    /// no panel; a name already there gets a number. Files only (a folder would have to be packed). The foot line
+    /// says while they come and once they are here; one that could not come stops the rest.
+    func download(_ paths: [String]) {
+        guard !local else { return }
+        let files = paths.filter { entry($0).map { !$0.isFolder && !$0.locked } ?? false }
+        guard !files.isEmpty else { return }
+        said = FilesWords.downloading(files)
+        Task { [weak self] in
+            guard let self else { return }
+            var saved: [String] = []
+            for path in files {
+                let to = FilesDownloads.free(in: FilesDownloads.folder(), name: (path as NSString).lastPathComponent)
+                do {
+                    try await self.client().downloadFile(path: path, to: to)
+                    // From another node, as a browser's download is marked: Gatekeeper looks at it before it runs.
+                    try? DispatchQuarantine.mark(to)
+                    saved.append(to.path)
+                } catch {
+                    let refusal = FilesRefusal(error)
+                    self.said = refusal == .tooLarge ? FilesWords.notDownloaded(node: self.nodeName) : refusal.sentence(node: self.nodeName)
+                    return
+                }
+            }
+            self.said = FilesWords.downloaded(saved)
+        }
+    }
 
     func showInFinder(_ paths: [String]) {
         guard local else { return }

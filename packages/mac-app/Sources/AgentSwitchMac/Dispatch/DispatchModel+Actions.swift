@@ -343,28 +343,56 @@ extension DispatchModel {
     /// decides: a document in its app; anything that could run only shown in Finder; a web page, SVG or XML as its
     /// source. The copy is downloaded again whenever the Mac lists the file in another version (size, time written).
     func open(_ file: DispatchTaskFile, taskId: String) async {
-        guard let service else { return }
-        let key = Self.fileKey(taskId, file.path)
-        guard !downloading.contains(key) else { return }
-        downloading.insert(key)
-        defer { downloading.remove(key) }
         do {
-            let url = try DispatchFileCache.url(taskId: taskId, path: file.path)
-            // The file as the Mac has it now (a card's list may be from long ago); unknown, the copy is not trusted.
-            let listed = try? await service.taskFiles(taskId: taskId)
-            if let listed { filesChanged(listed, for: taskId) }
-            let current = listed?.first { $0.path == file.path }
-            if current == nil || copies[key] != current?.version || !FileManager.default.fileExists(atPath: url.path) {
-                copies[key] = nil
-                try await service.downloadTaskFile(taskId: taskId, path: file.path, to: url)
-                // Whichever Mac it came from (DaemonClient marks its own downloads already).
-                try DispatchQuarantine.mark(url)
-                copies[key] = (current ?? file).version
-            }
+            guard let url = try await fetched(file, taskId: taskId) else { return }
             show(DispatchTaskFile.opening(file, at: url))
         } catch {
             report(error)
         }
+    }
+
+    /// `Save As…` (docs/dispatch-v0.md; 2026-11-08, user: 我下载一个它发送给我的文件应该让我选择下载位置): the system's
+    /// save panel, in Downloads under the file's name to start with; the copy goes where you chose, marked as a
+    /// download. The panel itself asks before a file there is replaced.
+    func saveAs(_ file: DispatchTaskFile, taskId: String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = file.name
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let to = panel.url else { return }
+        Task {
+            do {
+                guard let url = try await fetched(file, taskId: taskId) else { return }
+                if FileManager.default.fileExists(atPath: to.path) { try FileManager.default.removeItem(at: to) }
+                try FileManager.default.copyItem(at: url, to: to)
+                try DispatchQuarantine.mark(to)
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    /// The file's copy in the app's caches, downloaded unless the copy is of the version the Mac lists now; nil while
+    /// another fetch of it is on.
+    private func fetched(_ file: DispatchTaskFile, taskId: String) async throws -> URL? {
+        guard let service else { return nil }
+        let key = Self.fileKey(taskId, file.path)
+        guard !downloading.contains(key) else { return nil }
+        downloading.insert(key)
+        defer { downloading.remove(key) }
+        let url = try DispatchFileCache.url(taskId: taskId, path: file.path)
+        // The file as the Mac has it now (a card's list may be from long ago); unknown, the copy is not trusted.
+        let listed = try? await service.taskFiles(taskId: taskId)
+        if let listed { filesChanged(listed, for: taskId) }
+        let current = listed?.first { $0.path == file.path }
+        if current == nil || copies[key] != current?.version || !FileManager.default.fileExists(atPath: url.path) {
+            copies[key] = nil
+            try await service.downloadTaskFile(taskId: taskId, path: file.path, to: url)
+            // Whichever Mac it came from (DaemonClient marks its own downloads already).
+            try DispatchQuarantine.mark(url)
+            copies[key] = (current ?? file).version
+        }
+        return url
     }
 
     private func show(_ opening: DispatchFileOpening) {

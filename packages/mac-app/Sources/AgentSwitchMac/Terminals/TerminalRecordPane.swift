@@ -99,7 +99,7 @@ struct TerminalRecordPane: View {
                                 }
                                 ForEach(record.shown(working: working)) { item in
                                     RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work, source: source,
-                                              own: { place.own = Date() }) {
+                                              own: { place.own = Date() }, showFile: { model.files?.show(file: $0.path) }) {
                                         if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: item.id) }
                                     }
                                 }
@@ -278,6 +278,8 @@ private struct RecordRow: View {
     let source: RecordSource?
     /// The reader is opening or closing a part of it: the record's length changes by their doing.
     let own: () -> Void
+    /// An answer's file (docs/simple-view-v0.md §5.16): the Files column at it.
+    let showFile: (RecordFile) -> Void
     let showChanges: () -> Void
     @State private var open = false
     @State private var whole = false
@@ -316,8 +318,11 @@ private struct RecordRow: View {
             let head = whole ? nil : RecordDisplay.preview(item.text)
             VStack(alignment: .leading, spacing: 6) {
                 // What it thought on the way reads quieter than what it has to say to you.
-                MarkdownBlocks(text: head ?? item.text, size: Look.prose(look).size, color: item.thinking ? Look.ink2 : Look.ink,
-                               lineSpacing: Look.prose(look).lineSpacing, blockSpacing: Look.prose(look).blockSpacing)
+                if !item.text.isEmpty {
+                    MarkdownBlocks(text: head ?? item.text, size: Look.prose(look).size, color: item.thinking ? Look.ink2 : Look.ink,
+                                   lineSpacing: Look.prose(look).lineSpacing, blockSpacing: Look.prose(look).blockSpacing)
+                }
+                if !item.files.isEmpty { RecordFileChips(files: item.files, show: showFile) }
                 if head != nil {
                     Button { own(); whole = true } label: { Text("Show More").mono(Look.size(12, look), weight: .medium) }.buttonStyle(.plain).foregroundStyle(Color.signal)
                 } else if item.clipped {
@@ -910,5 +915,37 @@ struct RecordWriting: View {
                        lineSpacing: Look.prose(look).lineSpacing, blockSpacing: Look.prose(look).blockSpacing)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel(writing.thinking ? "Thinking" : "Writing")
+    }
+}
+
+/// The files an answer points at (docs/simple-view-v0.md §5.16; Codex's file citations): each a chip — the sheet mark,
+/// its name, its kind in the agent's word — a click opening the Files column at it; the right click copies its path.
+private struct RecordFileChips: View {
+    let files: [RecordFile]
+    let show: (RecordFile) -> Void
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        FlowLayout(spacing: 6) {
+            ForEach(files) { file in
+                Button { show(file) } label: {
+                    HStack(spacing: 6) {
+                        FileMark(state: .local)
+                        Text(file.name).lineLimit(1).truncationMode(.middle)
+                        if let kind = file.kindWord { Text(kind).foregroundStyle(Look.faint) }
+                    }
+                    .mono(Look.size(12, look))
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .grounded(Look.panel, radius: look.isClassic ? 8 : 0)
+                    .framed(Look.line, radius: look.isClassic ? 8 : 0)
+                }
+                .buttonStyle(.plain)
+                .help(file.path)
+                .contextMenu {
+                    Button("Show in Files") { show(file) }
+                    Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(file.path, forType: .string) }
+                }
+            }
+        }
     }
 }

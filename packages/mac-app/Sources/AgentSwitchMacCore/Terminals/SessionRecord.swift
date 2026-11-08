@@ -83,11 +83,14 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
     public let steps: [RecordStep]
     /// What an answer asks at its end, each with the answers it offers (Codex): taking one sends it as your reply.
     public let questions: [RecordQuestion]
+    /// The files an answer points at (Codex's file citations, taken out of its text): each shown as a file to open.
+    public let files: [RecordFile]
 
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
 
     public init(id: String, kind: Kind, at: Int64 = 0, text: String = "", images: Int = 0, queued: Bool = false, clipped: Bool = false,
-                thinking: Bool = false, seconds: Int = 0, steps: [RecordStep] = [], questions: [RecordQuestion] = [], from: String? = nil) {
+                thinking: Bool = false, seconds: Int = 0, steps: [RecordStep] = [], questions: [RecordQuestion] = [], files: [RecordFile] = [], from: String? = nil) {
+        self.files = files
         self.questions = questions
         self.from = from
         self.thinking = thinking
@@ -102,7 +105,7 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
         self.steps = steps
     }
 
-    private enum CodingKeys: String, CodingKey { case id, type, ts, text, images, queued, clipped, thinking, secs, steps, questions, from }
+    private enum CodingKeys: String, CodingKey { case id, type, ts, text, images, queued, clipped, thinking, secs, steps, questions, files, from }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -121,6 +124,7 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
         seconds = (try? c.decodeIfPresent(Int.self, forKey: .secs)) ?? 0
         steps = (try? c.decodeIfPresent([RecordStep].self, forKey: .steps)) ?? []
         questions = (try? c.decodeIfPresent([RecordQuestion].self, forKey: .questions)) ?? []
+        files = (try? c.decodeIfPresent([RecordFile].self, forKey: .files)) ?? []
     }
 
     /// Where it begins in the agent's file, when its id says (a record read coarsely numbers its items instead).
@@ -406,6 +410,29 @@ public struct RecordQuestion: Decodable, Sendable, Hashable {
     public init(title: String, options: [String]) {
         self.title = title
         self.options = options
+    }
+}
+
+/// A file an answer points at (docs/simple-view-v0.md §5.16): its whole path on the node, and what kind of thing it is
+/// in the agent's word (`workbook`, `document`…) when it says.
+public struct RecordFile: Decodable, Sendable, Hashable, Identifiable {
+    public let path: String
+    public let kind: String?
+
+    public init(path: String, kind: String? = nil) {
+        self.path = path
+        self.kind = kind
+    }
+
+    public var id: String { path }
+    public var name: String { (path as NSString).lastPathComponent }
+    /// Its folder, for a Files browser to open at.
+    public var folder: String { (path as NSString).deletingLastPathComponent }
+
+    /// The kind as a word on the screen (`Workbook`), from the agent's (`workbook`, `source_code`); none, nothing.
+    public var kindWord: String? {
+        guard let kind, !kind.isEmpty else { return nil }
+        return kind.split(whereSeparator: { $0 == "_" || $0 == "-" }).map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
     }
 }
 

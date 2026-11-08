@@ -434,6 +434,15 @@
 - Claude Code 的后台任务这里不给 `Stop`：它没有给外面的入口，要停就切到终端视图，用它自己的后台任务列表。
 - 演示页的 `Background` 与 `Writing` 两个状态。
 
+### 5.16 Codex 的文件引用（2026-11-08）
+
+用户给了一张手机上的截图：回答里原样露着 `:codex-file-citation{path="/Users/…/cyber_alive_oauth_65.xlsx" purpose="output" artifact_kind="workbook"}`，问“这是什么情况”。
+
+- **是什么**：Codex 0.163 起，回答里产出了文件时，往正文里写一段 `:名字{属性}` 式的 Markdown 指令（`path` 是整条路径，`purpose` 是 `output` 或引用，`artifact_kind` 是 `workbook`、`document` 之类）。ChatGPT 的 Codex 界面认得它、画成文件卡片；我们把回答当普通 Markdown 渲染，不认，就露出来了。
+- **服务**（`src/sessions/record.ts` `codexCitations`）：读 `AgentMessage` 时把这些指令从正文里摘掉（它们站的空行一并去掉），每个按路径记一次成回答的 `files: [{path, kind}]`（`kind` 照 Codex 的词；相对路径不收）；只有引用没有正文的回答也进记录。几条回答并成一条时文件跟着并。
+- **两端**（Mac `TerminalRecordPane` 的 `RecordFileChips`，手机 `RecordViews` 的同名）：回答正文下面一排文件条——文件标记、文件名（中间截断）、它的种类（`Workbook`，由 `workbook` / `source_code` 变成词）。点一下：Mac 上文件栏打开到它的文件夹并选中它（`FilesColumn.show(file:)`，预览随之出现，右键就有 `Open`、`Download` 等）；手机的终端页里是这一页的 Files 浏览器盖上来、文件的预览在最上（同 §12.4 的路径点击），以前会话的只读页上是 `Files` 标签页去它的文件夹。右键 / 长按：`Show in Files`、`Copy Path`。
+- 旧版服务没有 `files` 字段，两端照旧只显示文字；旧版应用拿到新字段不认、跳过。测试：服务（摘取与去重、记录里的位置）、两端的解码与词。预览：Mac `terminals-record*`、手机 `-uiDemoScreen simple` 里 `300` 那条回答带两个文件。
+
 ## 6. 安全
 
 - 记录是 agent 自己写下的会话，原来就经 `/sessions/:harness/:id` 给到已配对的手机；新接口是同一份内容的更细的读法，同一道门（远程只给已配对的设备，路由表里登记）。
