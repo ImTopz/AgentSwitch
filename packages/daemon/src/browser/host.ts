@@ -25,10 +25,11 @@ import { lookup } from "node:dns/promises";
 import { fileURLToPath } from "node:url";
 import type { BrowserDriver, DriverBrowser, DriverCookie, DriverPage, FocusedField, GuardDecision, GuardRequest } from "./driver.js";
 import { FillRefused, type FillResolver } from "./fill.js";
+import { boxNow, sameBox, type Scroll } from "./actionBox.js";
 import { inputCalls, NOTHING_PRESSED, type InputEvent, type Pressed } from "./input.js";
 import { AGENT_FILE_REFUSAL, checkLocalFile, checkUploadFile, checkUrl, isLoopbackAddress, isLoopbackHost, normalHost, OWN_PORT_REFUSAL, placeOf, portOf, type FileRules } from "./rules.js";
 import { renderScale, Screencast, viewAt, type StreamOptions } from "./screencast.js";
-import { BrowserError, DEFAULT_VIEWPORT, WINDOW_HOLDER, YOU, type AgentAction, type BrowserEvent, type ClosedReason, type HeldReason, type TabGroup, type TabInfo,
+import { BrowserError, DEFAULT_VIEWPORT, WINDOW_HOLDER, YOU, type AgentAction, type Box, type BrowserEvent, type ClosedReason, type FrameEvent, type HeldReason, type TabGroup, type TabInfo,
   type TabOwner, type TabOwnerKind, type TabStatus, type Viewport } from "./types.js";
 
 /** A person's fill on an agent's tab (browser-v0 §6): the value would stay in the page, which the agent reads after the
@@ -130,6 +131,11 @@ type TabRuntime = {
   forwardedAt: number;
   /** The last still picture of the page, and when it was taken. */
   picture: { readonly at: number; readonly data: Buffer } | null;
+  /** The frame around what an agent acted on, as measured: its box and how far the page was scrolled then (null: no
+   *  box, or one measured without that — it is shown where it was measured). */
+  placed: { readonly box: Box; readonly scroll: Scroll } | null;
+  /** What the page last showed (its latest frame): how far it is scrolled, and the size of its view. */
+  shown: { readonly scroll: Scroll; readonly view: { readonly width: number; readonly height: number } } | null;
 };
 
 const ownerKey = (o: Pick<TabOwner, "kind" | "id">): string => `${o.kind}:${o.id}`;
@@ -385,12 +391,48 @@ export class BrowserHost {
     this.emit(id, { type: "status", status });
   }
 
-  /** The agent bridge: what the agent just did (the screens' overlay); null clears it. */
-  setAction(id: string, action: Omit<AgentAction, "at"> | null): void {
+  /** The agent bridge: what the agent just did (the screens' overlay); null clears it. `scroll`: how far the page was
+   *  scrolled when the action's box was measured — with it the box follows the page (`scrolled`), and is left out
+   *  while no part of it is in view. */
+  setAction(id: string, action: Omit<AgentAction, "at"> | null, scroll?: Scroll): void {
     this.must(id);
-    const next = action ? { ...action, at: this.now() } : null;
+    const rt = this.runtimes.get(id);
+    const placed = action?.box && scroll ? { box: action.box, scroll } : null;
+    if (rt) rt.placed = placed;
+    // The measurement is the latest word on where the page stands (a frame of it may not have come yet).
+    if (rt?.shown && placed) rt.shown = { scroll: placed.scroll, view: rt.shown.view };
+    const { box: _measured, ...said } = action ?? { tool: "", description: "" };
+    const box = placed && rt?.shown ? boxNow(placed.box, placed.scroll, rt.shown.scroll, rt.shown.view) : action?.box ?? null;
+    const next = action ? { ...said, ...(box ? { box } : {}), at: this.now() } : null;
     this.update(id, { action: next });
     this.emit(id, { type: "action", action: next });
+  }
+
+  /** A frame came: the page shows this now. The frame around what an agent acted on goes where the element now is —
+   *  or away, while it is out of view — and the screens are told when that changed. */
+  private scrolled(id: string, frame: FrameEvent): void {
+    const rt = this.runtimes.get(id), state = this.states.get(id);
+    if (!rt || !state) return;
+    const before = rt.shown;
+    rt.shown = { scroll: { x: frame.scrollX, y: frame.scrollY }, view: frame.viewport };
+    if (!rt.placed || !state.action) return;
+    if (before && before.scroll.x === frame.scrollX && before.scroll.y === frame.scrollY && before.view.width === frame.viewport.width && before.view.height === frame.viewport.height) return;
+    const box = boxNow(rt.placed.box, rt.placed.scroll, rt.shown.scroll, rt.shown.view);
+    if (sameBox(box, state.action.box)) return;
+    const { box: _was, ...said } = state.action;
+    const next: AgentAction = { ...said, ...(box ? { box } : {}) };
+    this.update(id, { action: next });
+    this.emit(id, { type: "action", action: next });
+  }
+
+  /** Another document: what the box was around is gone. What the agent did stays said. */
+  private unplace(id: string): void {
+    const rt = this.runtimes.get(id), state = this.states.get(id);
+    if (rt) { rt.placed = null; rt.shown = null; }
+    if (!state?.action?.box) return;
+    const { box: _was, ...said } = state.action;
+    this.update(id, { action: said });
+    this.emit(id, { type: "action", action: said });
   }
 
   /** The agent bridge, before an agent's call that may point at the page (a click, a hover, a drag: Playwright's points
@@ -650,8 +692,8 @@ export class BrowserHost {
       id, owner, openedAt: this.now(), url: page.url() || "about:blank", title: page.title(), loading: false,
       status: "idle", heldBy: null, action: null, viewport: this.defaultViewport, viewportBy: null,
     });
-    const screencast = new Screencast(page, this.now, this.log, () => this.redraw(id), () => this.strayed(id));
-    this.runtimes.set(id, { page, screencast, listeners: new Set(), holdTimer: null, pressed: NOTHING_PRESSED, forwardedAt: 0, picture: null });
+    const screencast = new Screencast(page, this.now, this.log, () => this.redraw(id), () => this.strayed(id), (frame) => this.scrolled(id, frame));
+    this.runtimes.set(id, { page, screencast, listeners: new Set(), holdTimer: null, pressed: NOTHING_PRESSED, forwardedAt: 0, picture: null, placed: null, shown: null });
     // In a window of its own the person may act in an agent's tab: the page says when input reaches it (`touched`).
     if (owner.kind !== "you" && page.windowed?.()) page.watchTouches?.(true);
     page.on("touched", () => this.touched(id));
@@ -677,6 +719,7 @@ export class BrowserHost {
     const state = this.states.get(id);
     if (!state) return;
     this.update(id, { url, title });
+    if (url !== state.url) this.unplace(id);
     if (url !== state.url) this.emit(id, { type: "url", url, ...placeOf(url, this.opts.files.home) });
     if (title !== state.title) this.emit(id, { type: "title", title });
   }

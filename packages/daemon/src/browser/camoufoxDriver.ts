@@ -4,8 +4,9 @@
  *  - input: the host's calls become steps for Playwright's mouse and keyboard (camoufoxInput.ts), one call after another;
  *  - a page's size: `setViewportSize`. The page's pixel ratio is the browser's, one for every page, so nothing is drawn
  *    at a scale behind the page's back: the answer is always 1 and the host sends points in CSS pixels;
- *  - pictures: `page.screencast`, whose `onFrame` promise is the acknowledgement — the next picture comes once the
- *    host acknowledged this one, as with Chrome;
+ *  - pictures: screenshots of what the page shows, one after another (camoufoxPictures.ts) — the next is taken once
+ *    the host acknowledged this one, as with Chrome. Not `page.screencast`: with windows this Camoufox draws that from
+ *    the document's top, whatever the page is scrolled to (2026-11-10);
  *  - AgentSwitch's own ports: the routes see the first request to one; a redirect that lands on one is refused by the
  *    forwarder the browser's traffic goes through (§7.3 转发层), not here.
  *
@@ -16,7 +17,8 @@ import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { BrowserContext, Frame, Page, Request, Route } from "playwright-core";
-import { camoufoxEnv, camoufoxSteps, frameSize, releaseAll, type InputStep } from "./camoufoxInput.js";
+import { camoufoxEnv, camoufoxSteps, releaseAll, type InputStep } from "./camoufoxInput.js";
+import { PictureRun, type Shown } from "./camoufoxPictures.js";
 import type { BrowserDriver, DriverBrowser, DriverCookie, DriverPage, FocusedField, GuardDecision, InputMethod, LaunchOptions, PageEvents, RequestGuard, ScreencastParams } from "./driver.js";
 import { notePlaywrightInUse, type PlaywrightCopy } from "./engine/loader.js";
 import type { ForwarderAddress } from "./forwarder.js";
@@ -59,8 +61,9 @@ const PREFS: Readonly<Record<string, string | number | boolean>> = {
   "datareporting.policy.dataSubmissionEnabled": false,
 };
 
-type Picture = { readonly data: Buffer; readonly timestamp?: number; readonly viewportWidth: number; readonly viewportHeight: number };
-type Screencast = { start(opts: { quality: number; size: { width: number; height: number }; onFrame: (frame: Picture) => Promise<void> }): Promise<unknown>; stop(): Promise<void> };
+/** A page that does not answer where it is (a dialog of its own is up) is taken to be where it last was, after this. */
+const SHOWN_TIMEOUT_MS = 1_500;
+const SHOT_TIMEOUT_MS = 10_000;
 
 class CamoufoxPage implements DriverPage {
   private currentUrl: string;
@@ -81,8 +84,10 @@ class CamoufoxPage implements DriverPage {
   private readonly listeners: { [K in keyof PageEvents]: PageEvents[K][] } = { changed: [], loading: [], popup: [], frame: [], closed: [], touched: [] };
   /** The window's own size from before a holder gave the page one (windows only). */
   private own: { width: number; height: number } | null = null;
-  /** What the pictures under way were asked with, to ask again at another size. */
-  private casting: ScreencastParams | null = null;
+  /** The pictures under way. */
+  private pictures: PictureRun | null = null;
+  /** How far the page was scrolled when last asked. */
+  private scrolled = { x: 0, y: 0 };
   private touchTimer: NodeJS.Timeout | null = null;
   private touches: number | null = null;
 
@@ -211,6 +216,8 @@ class CamoufoxPage implements DriverPage {
       this.held = held;
       for (const step of steps) await this.play(step);
       this.releaseSoon();
+      // What was done shows at once, not at the pictures' next turn.
+      this.pictures?.nudge();
     });
     this.inputs = run.catch(() => undefined);
     return run;
@@ -247,27 +254,38 @@ class CamoufoxPage implements DriverPage {
     this.ratio ??= Number(await this.page.evaluate("devicePixelRatio").catch(() => 1)) || 1;
     // A window nobody sized for a screen is as large as the person made it.
     if (this.browser.windows && !this.own) this.view = await this.innerSize().catch(() => this.view);
-    this.casting = p;
-    const screencast = (this.page as unknown as { screencast: Screencast }).screencast;
-    await screencast.start({ quality: p.quality, size: frameSize(this.view, this.ratio, p), onFrame: (frame) => this.onFrame(frame) });
+    await this.pictures?.stop();
+    this.pictures = new PictureRun({
+      shown: () => this.shown(),
+      shot: (scale, quality) => this.page.screenshot({ type: "jpeg", quality, scale, caret: "initial", animations: "allow", timeout: SHOT_TIMEOUT_MS }),
+      send: (data, shown) => this.send(data, shown),
+      ratio: () => this.ratio ?? 1,
+      closed: () => this.page.isClosed(),
+    }, p);
   }
 
-  /** One picture to the host; the promise is what Playwright waits on before it asks the browser for the next. */
-  private onFrame(frame: Picture): Promise<void> {
-    // The person resized the window: pictures are asked for again at its new size.
-    if (this.browser.windows && !this.own && this.casting && (frame.viewportWidth !== this.view.width || frame.viewportHeight !== this.view.height)) {
-      const again = this.casting;
-      this.view = { width: frame.viewportWidth, height: frame.viewportHeight };
-      void this.stopScreencast().then(() => this.startScreencast(again)).catch(() => undefined);
+  /** What the page shows now. Its size is the page's own word: the person may have resized the window (one nobody
+   *  sized for a screen), and the pictures follow. */
+  private async shown(): Promise<Shown> {
+    const asked = this.page.evaluate("[innerWidth, innerHeight, scrollX, scrollY]") as Promise<[number, number, number, number]>;
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), SHOWN_TIMEOUT_MS); timer.unref(); });
+    const said = await Promise.race([asked.catch(() => null), late]).finally(() => clearTimeout(timer));
+    if (said) {
+      const [width, height, x, y] = said.map((n) => Math.round(Number(n) || 0)) as [number, number, number, number];
+      if (width > 0 && height > 0 && this.browser.windows && !this.own) this.view = { width, height };
+      this.scrolled = { x, y };
     }
+    return { width: this.view.width, height: this.view.height, ...this.scrolled };
+  }
+
+  /** One picture to the host; resolves once it acknowledged it, and the next is taken after that. */
+  private send(data: string, shown: Shown): Promise<void> {
     const ackId = ++this.frameId;
     const acknowledged = new Promise<void>((resolve) => this.unacked.set(ackId, resolve));
-    const metadata = {
-      deviceWidth: frame.viewportWidth, deviceHeight: frame.viewportHeight, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: 0, scrollOffsetY: 0,
-      // Chrome stamps in seconds, Juggler in milliseconds.
-      ...(frame.timestamp ? { timestamp: frame.timestamp / 1000 } : {}),
-    };
-    for (const l of this.listeners.frame) l({ data: frame.data.toString("base64"), ackId, metadata });
+    // Chrome stamps its frames in seconds.
+    const metadata = { deviceWidth: shown.width, deviceHeight: shown.height, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: shown.x, scrollOffsetY: shown.y, timestamp: Date.now() / 1000 };
+    for (const l of this.listeners.frame) l({ data, ackId, metadata });
     this.titleSoon();
     return acknowledged;
   }
@@ -278,9 +296,10 @@ class CamoufoxPage implements DriverPage {
   }
 
   async stopScreencast(): Promise<void> {
-    this.casting = null;
+    const run = this.pictures;
+    this.pictures = null;
     this.ackAll();
-    await (this.page as unknown as { screencast: Screencast }).screencast.stop().catch(() => undefined);
+    await run?.stop();
   }
 
   async ackFrame(ackId: number): Promise<void> {

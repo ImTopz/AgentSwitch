@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { camoufoxEnv, camoufoxSteps, frameSize, releaseAll } from "../src/browser/camoufoxInput.js";
+import { camoufoxEnv, camoufoxSteps, releaseAll } from "../src/browser/camoufoxInput.js";
+import { PictureRun, shotScale, SHOT_EVERY_MS, SHOT_STILL_MS, type Shown } from "../src/browser/camoufoxPictures.js";
 import { inputCalls, NOTHING_PRESSED } from "../src/browser/input.js";
 import type { Modifier } from "../src/browser/input.js";
 
@@ -67,13 +68,120 @@ describe("what Camoufox is started with", () => {
     expect(camoufoxEnv({})).toEqual({ CAMOU_CONFIG_1: "{}" });
   });
 
-  it("pictures are asked for at the screen's pixels, within what the watchers take, never smaller than the view", () => {
-    expect(frameSize({ width: 1280, height: 800 }, 2, {})).toEqual({ width: 2560, height: 1600 });
-    expect(frameSize({ width: 1280, height: 800 }, 2, { maxWidth: 1920 })).toEqual({ width: 1920, height: 1200 });
-    expect(frameSize({ width: 1280, height: 800 }, 2, { maxWidth: 640, maxHeight: 400 })).toEqual({ width: 1280, height: 800 });
-    expect(frameSize({ width: 391, height: 845 }, 1, {})).toEqual({ width: 390, height: 844 });
+  it("pictures are taken at the page's own pixels when the watchers take that many, else at one per CSS pixel", () => {
+    expect(shotScale({ width: 1280, height: 800 }, 2, {})).toBe("device");
+    expect(shotScale({ width: 1280, height: 800 }, 2, { maxWidth: 2560, maxHeight: 1600 })).toBe("device");
+    expect(shotScale({ width: 1280, height: 800 }, 2, { maxWidth: 1920 })).toBe("css");
+    expect(shotScale({ width: 1280, height: 800 }, 2, { maxWidth: 3456, maxHeight: 1200 })).toBe("css");
+    expect(shotScale({ width: 402, height: 700 }, 2, { maxWidth: 1206, maxHeight: 2622 })).toBe("device");
+    expect(shotScale({ width: 391, height: 845 }, 1, { maxWidth: 200 })).toBe("css");
   });
 });
+
+describe("the pictures of a Camoufox page (camoufoxPictures.ts; 2026-11-10: what is in view, not the document's top)", () => {
+  /** A page whose picture is `face`, shown at `at`; every look and every wait is written down. */
+  function page() {
+    const state = { face: "a", at: { width: 1280, height: 800, x: 0, y: 0 } as Shown, closed: false, failing: false };
+    const sent: { face: string; shown: Shown }[] = [];
+    const shots: string[] = [];
+    const waits: number[] = [];
+    let ack: (() => void) | null = null;
+    let clock = 0;
+    let turn: (() => void) | null = null;
+    const source = {
+      shown: async () => state.at,
+      shot: async (scale: "device" | "css") => { shots.push(scale); if (state.failing) throw new Error("navigating"); return Buffer.from(state.face); },
+      send: (data: string, shown: Shown) => new Promise<void>((resolve) => { sent.push({ face: Buffer.from(data, "base64").toString(), shown }); ack = resolve; }),
+      ratio: () => 2,
+      closed: () => state.closed,
+      now: () => clock,
+      // Each wait is held until the test lets it go (or a nudge wakes it).
+      sleep: (ms: number, woken: Promise<void>) => { waits.push(ms); return Promise.race([new Promise<void>((resolve) => { turn = () => { clock += ms; resolve(); }; }), woken]); },
+    };
+    const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+    return { state, sent, shots, waits, source, settle, ack: async () => { ack?.(); ack = null; await settle(); }, next: async () => { turn?.(); turn = null; await settle(); } };
+  }
+
+  it("sends what the page shows with where it is scrolled to, the next one only after the acknowledgement", async () => {
+    const p = page();
+    const run = new PictureRun(p.source, { quality: 60, maxWidth: 2560, maxHeight: 1600 });
+    await p.settle();
+    expect(p.sent).toEqual([{ face: "a", shown: { width: 1280, height: 800, x: 0, y: 0 } }]);
+    expect(p.shots).toEqual(["device"]);
+    // Not acknowledged: nothing more is looked at, whatever the page does.
+    p.state.face = "b";
+    await p.settle();
+    expect(p.shots).toHaveLength(1);
+    await p.ack();
+    await p.next();
+    expect(p.sent.map((s) => s.face)).toEqual(["a", "b"]);
+    // Scrolled: the picture carries where to.
+    p.state.at = { width: 1280, height: 800, x: 0, y: 1600 };
+    p.state.face = "c";
+    await p.ack();
+    await p.next();
+    expect(p.sent[2]).toEqual({ face: "c", shown: { width: 1280, height: 800, x: 0, y: 1600 } });
+    await p.ack();
+    await run.stop();
+  });
+
+  it("sends nothing while the page stands still, and looks less and less often — at once again when something is done to it", async () => {
+    const p = page();
+    const run = new PictureRun(p.source, { quality: 60 });
+    await p.settle();
+    await p.ack();
+    for (let i = 0; i < 5; i++) await p.next();
+    expect(p.sent).toHaveLength(1);
+    expect(p.shots.length).toBeGreaterThanOrEqual(5);
+    expect(p.waits.slice(0, 5)).toEqual([SHOT_EVERY_MS, 2 * SHOT_EVERY_MS, 4 * SHOT_EVERY_MS, SHOT_STILL_MS, SHOT_STILL_MS]);
+    // The same picture somewhere else is another picture.
+    p.state.at = { width: 1280, height: 800, x: 0, y: 40 };
+    await p.next();
+    expect(p.sent).toHaveLength(2);
+    await p.ack();
+    await p.next();
+    await p.next();
+    // Input: the wait under way ends, and the page is looked at often again.
+    const looked = p.shots.length;
+    p.state.face = "typed";
+    run.nudge();
+    await p.settle();
+    expect(p.shots.length).toBe(looked + 1);
+    expect(p.sent.map((s) => s.face).pop()).toBe("typed");
+    await p.ack();
+    expect(p.waits.at(-1)).toBe(SHOT_EVERY_MS);
+    await run.stop();
+  });
+
+  it("goes on past a look that fails (between two documents), and ends when stopped or when the page is gone", async () => {
+    const p = page();
+    p.state.failing = true;
+    const run = new PictureRun(p.source, { quality: 60, maxWidth: 1280 });
+    await p.settle();
+    expect(p.sent).toEqual([]);
+    p.state.failing = false;
+    await p.next();
+    expect(p.sent.map((s) => s.face)).toEqual(["a"]);
+    expect(p.shots).toEqual(["css", "css"]);
+    await p.ack();
+    await run.stop();
+    const looked = p.shots.length;
+    await p.next();
+    expect(p.shots.length).toBe(looked);
+    // A page that closed: its run ends by itself.
+    const q = page();
+    const gone = new PictureRun(q.source, { quality: 60 });
+    await q.settle();
+    q.state.closed = true;
+    await q.ack();
+    await q.next();
+    const before = q.shots.length;
+    await q.next();
+    expect(q.shots.length).toBe(before);
+    await gone.stop();
+  });
+});
+
 
 // ---- which browser the host starts ----
 import { launchFailure } from "../src/browser/host.js";

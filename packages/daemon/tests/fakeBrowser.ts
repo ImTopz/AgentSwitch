@@ -110,11 +110,14 @@ export class FakePage implements DriverPage {
     for (const l of this.listeners.changed) l({ url, title });
   }
   loading(loading: boolean): void { for (const l of this.listeners.loading) l(loading); }
+  /** How far the page is scrolled, as its frames say. */
+  scrollX = 0;
+  scrollY = 0;
   /** A screencast frame of a `width`×`height` image for a `deviceWidth`×`deviceHeight` view (Chrome's metadata: the
    *  view's size, which is the viewport's times the scale the view is drawn at). `timestamp`: when Chrome sent it, in
    *  seconds, as Chrome says it; none: a Chrome that does not say. */
   frame(width: number, height: number, deviceWidth = width, deviceHeight = height, ackId = 1, timestamp?: number): void {
-    const metadata = { deviceWidth, deviceHeight, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: 0, scrollOffsetY: 0, ...(timestamp !== undefined ? { timestamp } : {}) };
+    const metadata = { deviceWidth, deviceHeight, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: this.scrollX, scrollOffsetY: this.scrollY, ...(timestamp !== undefined ? { timestamp } : {}) };
     const raw: RawFrame = { data: fakeJpeg(width, height), ackId, metadata };
     for (const l of this.listeners.frame) l(raw);
   }

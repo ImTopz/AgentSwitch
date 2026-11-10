@@ -189,9 +189,12 @@ export class Screencast {
   private strayed = false;
 
   /** `onDemand`: the streams changed (one came or went), so the scale they ask for may have (the host redraws).
-   *  `onStray`: Chrome's view is not the one the host drew (the host draws it again). */
+   *  `onStray`: Chrome's view is not the one the host drew (the host draws it again).
+   *  `onShown`: a frame of the view came — what the page shows now, and how far it is scrolled (the host moves the
+   *  frame around what an agent acted on, actionBox.ts). */
   constructor(private readonly page: DriverPage, private readonly now: () => number = Date.now, private readonly log: (line: string) => void = console.error,
-              private readonly onDemand: () => void = () => undefined, private readonly onStray: () => void = () => undefined) {
+              private readonly onDemand: () => void = () => undefined, private readonly onStray: () => void = () => undefined,
+              private readonly onShown: (frame: FrameEvent) => void = () => undefined) {
     page.on("frame", (f) => this.onFrame(f));
   }
 
@@ -419,6 +422,7 @@ export class Screencast {
       viewport, pageScale: meta.pageScaleFactor, scrollX: meta.scrollOffsetX, scrollY: meta.scrollOffsetY,
     };
     this.last = frame;
+    this.onShown(frame);
     this.geometries.set(frame.seq, { scale, width: viewport.width, height: viewport.height });
     if (this.geometries.size > GEOMETRIES_KEPT) this.geometries.delete(this.geometries.keys().next().value!);
     for (const sub of this.subs.values()) this.offer(sub, frame);

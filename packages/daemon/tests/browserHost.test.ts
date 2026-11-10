@@ -238,6 +238,54 @@ describe("tabs", () => {
     ]);
     expect(host.get(tab.id)!.status).toBe("busy");
   });
+
+  it("the frame around what an agent acted on follows the page as it scrolls, goes while out of view, and goes with the document (2026-11-10)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(5_000);
+    const { host, driver } = make();
+    const tab = await host.open(CODEX, "https://github.com/");
+    const p = driver.browser!.pages[0]!;
+    const events: BrowserEvent[] = [];
+    host.subscribe(tab.id, { quality: 50, fps: 10 }, (e) => events.push(e));
+    const boxes = () => events.filter((e) => e.type === "action").map((e) => (e as { action: { box?: unknown } | null }).action?.box ?? null);
+    p.frame(1280, 800);
+    // Measured with the page scrolled to 300: shown where it was measured.
+    host.setAction(tab.id, { tool: "browser_click", description: 'click "Merge"', box: { x: 100, y: 400, width: 200, height: 60 } }, { x: 0, y: 300 });
+    expect(host.get(tab.id)!.action).toEqual({ tool: "browser_click", description: 'click "Merge"', box: { x: 100, y: 400, width: 200, height: 60 }, at: 5_000 });
+    // A frame of the page where it was measured: nothing to say.
+    p.scrollY = 300;
+    p.frame(1280, 800);
+    expect(boxes()).toHaveLength(1);
+    // Scrolled 250 further down: the element is 250 higher in the picture.
+    p.scrollY = 550;
+    p.frame(1280, 800);
+    expect(host.get(tab.id)!.action).toEqual({ tool: "browser_click", description: 'click "Merge"', box: { x: 100, y: 150, width: 200, height: 60 }, at: 5_000 });
+    // The same place again: not said twice.
+    p.frame(1280, 800);
+    expect(boxes()).toHaveLength(2);
+    // Out of view: no frame around anything; what the agent did stays said.
+    p.scrollY = 2000;
+    p.frame(1280, 800);
+    expect(host.get(tab.id)!.action).toEqual({ tool: "browser_click", description: 'click "Merge"', at: 5_000 });
+    // Back in view: it is there again.
+    p.scrollY = 300;
+    p.frame(1280, 800);
+    expect(boxes()).toEqual([{ x: 100, y: 400, width: 200, height: 60 }, { x: 100, y: 150, width: 200, height: 60 }, null, { x: 100, y: 400, width: 200, height: 60 }]);
+    // Another document: the box is of nothing on it.
+    p.change("https://github.com/pulls", "Pulls");
+    expect(host.get(tab.id)!.action).toEqual({ tool: "browser_click", description: 'click "Merge"', at: 5_000 });
+    p.scrollY = 300;
+    p.frame(1280, 800);
+    expect(host.get(tab.id)!.action).toEqual({ tool: "browser_click", description: 'click "Merge"', at: 5_000 });
+    // A box measured out of the view the page last showed is not drawn; one measured with no word of the scroll is
+    // shown as given, as before.
+    p.scrollY = 0;
+    p.frame(1280, 800);
+    host.setAction(tab.id, { tool: "browser_hover", description: "hover", box: { x: 10, y: 900, width: 50, height: 20 } }, { x: 0, y: 0 });
+    expect(host.get(tab.id)!.action).toEqual({ tool: "browser_hover", description: "hover", at: 5_000 });
+    host.setAction(tab.id, { tool: "browser_hover", description: "hover", box: { x: 10, y: 900, width: 50, height: 20 } });
+    expect(host.get(tab.id)!.action!.box).toEqual({ x: 10, y: 900, width: 50, height: 20 });
+  });
 });
 
 describe("holding a tab", () => {

@@ -34,7 +34,8 @@ import type { BrowserAudit } from "./audit.js";
 import type { BrowserHost } from "./host.js";
 import { codeRefusal, EVALUATE_TOOL, RUN_CODE_TOOL } from "./probes.js";
 import { auditUrl, UPLOAD_MAX_BYTES } from "./rules.js";
-import { BrowserError, type Box, type TabOwner } from "./types.js";
+import type { MeasuredBox } from "./actionBox.js";
+import { BrowserError, type TabOwner } from "./types.js";
 
 /** The bridge script next to this module: bridgeClient.js in dist/, bridgeClient.ts under tsx (node strips its types). */
 const EXT = import.meta.url.endsWith(".ts") ? "ts" : "js";
@@ -95,8 +96,9 @@ export interface EngineConnection {
   currentTab(): string | null;
   /** The tab at `index` of the agent's own list (`browser_tabs` select and close). */
   tabAt(index: number): string | null;
-  /** Where `target` (a snapshot ref or a selector) is on the current tab, in the page's CSS pixels; null when unknown. */
-  box(target: string): Promise<Box | null>;
+  /** Where `target` (a snapshot ref or a selector) is on the current tab, in the page's CSS pixels, with how far the
+   *  page is scrolled there where that is known; null when unknown. */
+  box(target: string): Promise<MeasuredBox | null>;
   /** Before a call is handed over: waits out the grace after a hand-back (heldTraffic.ts) and returns the tabs, held
    *  before, whose logs could not be kept clear of the hold (their log tools are then refused). */
   settle?(): Promise<readonly string[]>;
@@ -451,7 +453,7 @@ export class BrowserAgents {
     const element = targetArg(tool, args);
     // Nobody may hold what the call acts on when it is handed over: wait for the hand-back, and look again after
     // anything that took a moment (the element's box, the grace after a hold), since a screen may take it meanwhile.
-    let box: Box | null = null;
+    let box: MeasuredBox | null = null;
     let exposed: readonly string[] = [];
     for (;;) {
       if (!(await this.free(conn, id, this.reachOf(engine, owner, tool, args)))) {
@@ -481,7 +483,8 @@ export class BrowserAgents {
     const before = engine.currentTab();
     if (target) {
       this.quietly(() => this.opts.host.setStatus(target, "busy"));
-      if (shown) this.quietly(() => this.opts.host.setAction(target, { tool, description: shown, ...(box ? { box } : {}) }));
+      // The box with where the page stood when it was measured: the host moves it as the page scrolls (actionBox.ts).
+      if (shown) this.quietly(() => this.opts.host.setAction(target, { tool, description: shown, ...(box ? { box: { x: box.x, y: box.y, width: box.width, height: box.height } } : {}) }, box?.scroll));
     }
     // Playwright's points are CSS pixels: the agent's tabs at the CSS size while it may point at the page.
     const pointing = !POINTLESS_TOOLS.has(tool);
@@ -628,7 +631,7 @@ export class BrowserAgents {
     });
   }
 
-  private async boxOf(engine: EngineConnection, element: string): Promise<Box | null> {
+  private async boxOf(engine: EngineConnection, element: string): Promise<MeasuredBox | null> {
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<null>((r) => { timer = setTimeout(() => r(null), BOX_MS); timer.unref?.(); });
     const box = await Promise.race([engine.box(element).catch(() => null), late]);

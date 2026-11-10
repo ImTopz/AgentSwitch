@@ -28,6 +28,7 @@ import type { AgentEngine, EngineConnection, JsonRpcMessage } from "./agents.js"
 import { HeldTraffic } from "./heldTraffic.js";
 import type { BrowserHost } from "./host.js";
 import { limitTab, releaseConsoleArgs } from "./tabLimits.js";
+import type { MeasuredBox } from "./actionBox.js";
 import type { Box, TabOwner } from "./types.js";
 
 /** How long the box of the element a call acts on may take. */
@@ -57,7 +58,12 @@ const BODILESS_TYPE = `document.querySelector("body[data-agentswitch-stand-in]")
 /** Pages that have the stand-in script (one page may be in several connections' contexts). */
 const prepared = new WeakSet<object>();
 
-type McpLocator = { boundingBox(options: { timeout: number }): Promise<Box | null> };
+type McpLocator = {
+  boundingBox(options: { timeout: number }): Promise<Box | null>;
+  /** Playwright's own; absent on a fake. */
+  scrollIntoViewIfNeeded?(options: { timeout: number }): Promise<void>;
+  page?(): { evaluate?(expression: string): Promise<unknown> };
+};
 /** What is read of Playwright MCP's own tab and context objects (public members of `tools.Tab` and its `context`). */
 export type McpTab = {
   readonly page: unknown;
@@ -180,13 +186,21 @@ export class AgentContext extends EventEmitter {
     return [...this.byTab].filter(([, page]) => this.unguarded.has(page as object) && traffic.everHeld(page)).map(([id]) => id);
   }
 
-  /** Where `target` is on the current tab (Playwright MCP's own resolution of a ref or selector), in CSS pixels. */
-  async box(target: string): Promise<Box | null> {
+  /** Where `target` is on the current tab (Playwright MCP's own resolution of a ref or selector), in CSS pixels, and
+   *  how far the page is scrolled there. The element is brought into view first, as the call about to act on it will
+   *  bring it: measured before that, an element further down the page had its box below the picture, and the frame
+   *  stayed there after the click scrolled it up (2026-11-10). */
+  async box(target: string): Promise<MeasuredBox | null> {
     const tab = this.mcp?.currentTab();
     if (!tab) return null;
     const { locator } = await tab.targetLocator({ target });
+    await locator.scrollIntoViewIfNeeded?.({ timeout: BOX_TIMEOUT_MS }).catch(() => undefined);
     const box = await locator.boundingBox({ timeout: BOX_TIMEOUT_MS });
-    return box ? { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) } : null;
+    if (!box) return null;
+    const page = typeof locator.page === "function" ? locator.page() : null;
+    const scroll = page && typeof page.evaluate === "function" ? await page.evaluate("[scrollX, scrollY]").then((s) => s as [number, number], () => null) : null;
+    return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height),
+      ...(scroll ? { scroll: { x: Math.round(Number(scroll[0]) || 0), y: Math.round(Number(scroll[1]) || 0) } } : {}) };
   }
 
   /** The content type of tab `id`'s document when it has no body of its own (`image/svg+xml`): its snapshot is empty.

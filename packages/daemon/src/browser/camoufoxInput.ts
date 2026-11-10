@@ -65,13 +65,3 @@ export function camoufoxEnv(config: Readonly<Record<string, unknown>>, platform:
   for (let i = 0; i * size < text.length; i++) env[`CAMOU_CONFIG_${i + 1}`] = text.slice(i * size, (i + 1) * size);
   return env;
 }
-
-/** The size of the pictures to ask for: the view at the screen's pixels, within what the watchers take (`maxWidth`,
- *  `maxHeight`), never below the view's own size, both even (the encoder's). */
-export function frameSize(view: { readonly width: number; readonly height: number }, ratio: number, max: { readonly maxWidth?: number | undefined; readonly maxHeight?: number | undefined }): { width: number; height: number } {
-  let scale = Math.max(1, ratio || 1);
-  if (max.maxWidth) scale = Math.min(scale, max.maxWidth / view.width);
-  if (max.maxHeight) scale = Math.min(scale, max.maxHeight / view.height);
-  scale = Math.max(1, scale);
-  return { width: Math.round(view.width * scale) & ~1, height: Math.round(view.height * scale) & ~1 };
-}

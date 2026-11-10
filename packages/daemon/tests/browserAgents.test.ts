@@ -13,7 +13,7 @@ import { BrowserAgents, bridgeCommand, describeCall, FILES_REFUSED, HELD_LOGS_RE
 import { BrowserAudit } from "../src/browser/audit.js";
 import { BrowserHost } from "../src/browser/host.js";
 import { YOU, type TabOwner } from "../src/browser/types.js";
-import { FakeDriver } from "./fakeBrowser.js";
+import { FakeDriver, type FakePage } from "./fakeBrowser.js";
 
 const CODEX: TabOwner = { kind: "terminal", id: "t1", label: "codex · AgentSwitch" };
 const CLAUDE: TabOwner = { kind: "terminal", id: "t2", label: "claude · site" };
@@ -66,7 +66,7 @@ class FakeConnection implements EngineConnection {
   boxGate: Promise<void> | null = null;
   async box(target: string) {
     if (this.boxGate) await this.boxGate;
-    return target === "e12" ? { x: 10, y: 20, width: 100, height: 30 } : null;
+    return target === "e12" ? { x: 10, y: 20, width: 100, height: 30, scroll: { x: 0, y: 300 } } : null;
   }
   /** What `settle` answers: the tabs whose logs could not be kept clear of a hold. */
   exposed: string[] = [];
@@ -266,6 +266,17 @@ describe("the MCP connection", () => {
     release();
     await clicking;
     expect(host.get(tab)!.status).toBe("idle");
+    // The box was measured with the page scrolled to 300 and the host knows it: a frame of the page 12 further down
+    // puts it 12 higher (2026-11-10).
+    const stop = host.subscribe(tab, { quality: 50, fps: 10 }, () => undefined);
+    const page = host.page(tab) as unknown as FakePage;
+    page.scrollY = 312;
+    page.frame(1280, 800);
+    expect(host.get(tab)!.action!.box).toEqual({ x: 10, y: 8, width: 100, height: 30 });
+    page.scrollY = 300;
+    page.frame(1280, 800);
+    expect(host.get(tab)!.action!.box).toEqual({ x: 10, y: 20, width: 100, height: 30 });
+    stop();
     // A gate probe leaves the overlay as it was.
     engines[0]!.gate = null;
     await c.call("browser_evaluate", { function: "() => location.href" });

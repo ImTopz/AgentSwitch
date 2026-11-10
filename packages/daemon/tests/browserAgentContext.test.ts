@@ -33,7 +33,14 @@ class FakeMcp implements McpContext {
     // With the lists `tools.Tab` keeps of its page and the member that adds to them.
     const buffers = { _recentEventEntries: [] as object[], _requests: [] as object[], _consoleLog: null, _resetLogs: () => undefined,
       _addLogEntry(entry: object) { this._recentEventEntries.push(entry); } };
-    const tab: McpTab = Object.assign(buffers, { page, context: this, targetLocator: async () => ({ locator: { boundingBox: async () => ({ x: 10.4, y: 20.6, width: 99.5, height: 30 }) } }) });
+    // Its element is below the view until it is brought into it (as Playwright's own locator does it), the page then scrolled to 640.
+    const where = { inView: false };
+    const locator = {
+      scrollIntoViewIfNeeded: async () => { where.inView = true; },
+      boundingBox: async () => (where.inView ? { x: 10.4, y: 20.6, width: 99.5, height: 30 } : { x: 10.4, y: 660.6, width: 99.5, height: 30 }),
+      page: () => ({ evaluate: async () => [0, where.inView ? 640.2 : 0] }),
+    };
+    const tab: McpTab = Object.assign(buffers, { page, context: this, targetLocator: async () => ({ locator }) });
     (page as Record<symbol, McpTab>)[FakeMcp.TAG] = tab;
     this.made.push(tab);
     this.current ??= tab;
@@ -96,7 +103,8 @@ describe("an agent's context", () => {
     expect(context.currentTabId()).toBe(tab!.id);
     expect(context.tabIdAt(0)).toBe(tab!.id);
     expect(context.tabIdAt(3)).toBeNull();
-    expect(await context.box("e12")).toEqual({ x: 10, y: 21, width: 100, height: 30 });
+    // The element is brought into view before it is measured, and the box says how far the page is scrolled there.
+    expect(await context.box("e12")).toEqual({ x: 10, y: 21, width: 100, height: 30, scroll: { x: 0, y: 640 } });
   });
 
   it("refuses what reaches the whole context; closes only its own tabs", async () => {

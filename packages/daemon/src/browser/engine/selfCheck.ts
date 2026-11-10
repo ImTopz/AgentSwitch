@@ -1,7 +1,7 @@
 /** A new pair checks itself before it is switched to (docs/browser-v0.md §7.2 第 6 条): the Camoufox and the Playwright
  *  that would be in use are started on a profile of their own, headless, against a page served from this process, and
- *  asked for what the service needs of them — a page, another size, pictures one after another, a request refused,
- *  the agents' tools. A build that is not of the Playwright's Firefox fails here (measured 2026-10-05: 152 under a
+ *  asked for what the service needs of them — a page, another size, pictures one after another and of what is in
+ *  view, a request refused, the agents' tools. A build that is not of the Playwright's Firefox fails here (measured 2026-10-05: 152 under a
  *  Playwright for 156 fails at the resize and sends one picture). Starts a real browser: not for unit tests. */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -19,7 +19,10 @@ const FRAMES_MS = 3_000;
 const FRAMES_ENOUGH = 5;
 
 const PAGE = `<!doctype html><meta charset=utf-8><title>engine check</title><div id=box style="position:absolute;top:40px;width:60px;height:60px;background:#f0c"></div>
+<div style="position:absolute;top:3000px;left:0;width:400px;height:400px;background:#0a6"></div>
 <script>let x=0;setInterval(()=>{x=(x+7)%500;document.getElementById('box').style.left=x+'px'},16)</script>`;
+/** The pictures the service takes of a page (camoufoxPictures.ts): what is in view, as it is. */
+const SHOT = { type: "jpeg", quality: 60, scale: "css", caret: "initial", animations: "allow" } as const;
 
 type Page = {
   goto(url: string): Promise<unknown>;
@@ -27,7 +30,7 @@ type Page = {
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   evaluate(code: string): Promise<unknown>;
   waitForTimeout(ms: number): Promise<void>;
-  screencast: { start(opts: { quality: number; onFrame: (frame: unknown) => void }): Promise<unknown>; stop(): Promise<void> };
+  screenshot(opts: typeof SHOT): Promise<Buffer>;
 };
 type Context = {
   pages(): Page[];
@@ -83,11 +86,25 @@ export function engineSelfCheck(store: EngineStore, platform: string = process.p
       await page.setViewportSize({ width: 900, height: 600 });
       if (await page.evaluate("innerWidth") !== 900) return fail("页面没有跟着改变大小。");
       step = "连续出帧";
-      let frames = 0;
-      await page.screencast.start({ quality: 60, onFrame: () => { frames++; } });
-      await page.waitForTimeout(FRAMES_MS);
-      await page.screencast.stop();
+      // Pictures as the service takes them: screenshots one after another, each different while the page moves.
+      let frames = 0, last = "";
+      for (const until = Date.now() + FRAMES_MS; Date.now() < until && frames < 4 * FRAMES_ENOUGH;) {
+        const shot = (await page.screenshot(SHOT)).toString("base64");
+        if (shot !== last) frames++;
+        last = shot;
+        await page.waitForTimeout(40);
+      }
       if (frames < FRAMES_ENOUGH) return fail(`${FRAMES_MS / 1000} 秒内只有 ${frames} 帧。`);
+      signal.throwIfAborted();
+      step = "画面跟随滚动";
+      // What is in view, not the document's top (2026-11-10): scrolled to the green block, the picture is of it — the
+      // moving box, far above, is not in it, so two pictures there are the same and neither is a picture of the top.
+      await page.evaluate("scrollTo(0, 3000)");
+      await page.waitForTimeout(200);
+      const there = (await page.screenshot(SHOT)).toString("base64");
+      await page.waitForTimeout(120);
+      if ((await page.screenshot(SHOT)).toString("base64") !== there) return fail("滚动之后的画面仍是页面顶部。");
+      await page.evaluate("scrollTo(0, 0)");
       signal.throwIfAborted();
       step = "拦截";
       await context.route((url) => url.pathname.startsWith("/refused"), (route) => route.abort("blockedbyclient"));
