@@ -164,7 +164,11 @@ export function mountBrowser(app: Hono, deps: ApiDeps): void {
 
   // `engine`: which browser the host starts now; `windows`: its tabs have windows of their own on this Mac (docs/browser-v0.md
   // §7.2), so a screen there shows the list and brings windows forward instead of drawing pictures.
-  app.get("/browser/tabs", (c) => c.json({ running: host.running, groups: host.groups(), engine: b.engine(), windows: b.windows() }));
+  // `engineNotice`: what about the engine waits for the person (kit.ts `notice`), absent when nothing does.
+  app.get("/browser/tabs", (c) => {
+    const notice = deps.engineKit?.notice() ?? null;
+    return c.json({ running: host.running, groups: host.groups(), engine: b.engine(), windows: b.windows(), ...(notice ? { engineNotice: notice } : {}) });
+  });
 
   // The tab's window before the browser's other windows (the Mac app then brings the browser forward). Local only.
   app.post("/browser/tabs/:id/show", async (c) => {

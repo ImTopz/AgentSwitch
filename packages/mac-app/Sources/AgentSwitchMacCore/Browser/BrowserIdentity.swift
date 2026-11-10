@@ -296,10 +296,13 @@ public struct BrowserEngineUpdate: Sendable, Equatable, Decodable {
     public let error: String?
     /// The versions it is to install, by part (`camoufox`, `playwright`).
     public let to: [String: String]?
+    /// `tabs`: fetched and checked, it waits for every tab to be closed before it is switched to.
+    public let held: String?
 
     public init(running: Bool, phase: String? = nil, part: String? = nil, received: Int64? = nil, total: Int64? = nil, ok: Bool? = nil, error: String? = nil,
-                to: [String: String]? = nil) {
+                to: [String: String]? = nil, held: String? = nil) {
         self.to = to
+        self.held = held
         self.running = running
         self.phase = phase
         self.part = part
@@ -337,10 +340,13 @@ public enum BrowserEngineText {
         case "verify": return "checksum"
         case "unpack": return "unpack"
         case "check": return "self-check"
-        case "switch": return "switching"
+        case "switch": return update.held == nil ? "switching" : "waiting for tabs to close"
         default: return "starting"
         }
     }
+
+    /// Under the steps while a build waits for the tabs.
+    public static let heldHint = "新版本已下载并通过自检，所有标签页关闭后自动切换。立即切换会重启浏览器，标签页随后恢复。"
 
     /// What a check found: `156.0.1-beta.36 · 1.29 GB`; nil: nothing newer.
     public static func offer(_ engine: BrowserEngine) -> String? {
@@ -437,6 +443,11 @@ extension DaemonClient {
         _ = try await dispatchCall("POST", "/browser/engine/update", json: ["camoufox": camoufox], timeout: BrowserTimeouts.open)
     }
 
+    /// `POST /browser/engine/switch`: the build that waits for the tabs to be closed, switched to now.
+    public func switchEngineNow() async throws {
+        _ = try await dispatchCall("POST", "/browser/engine/switch", json: [String: String](), timeout: BrowserTimeouts.open)
+    }
+
     public func cancelEngineUpdate() async throws {
         _ = try await dispatchCall("POST", "/browser/engine/cancel", json: [String: String](), timeout: BrowserTimeouts.request)
     }
@@ -456,6 +467,7 @@ public protocol BrowserIdentityService: Sendable {
     func browserEngine(check: Bool) async throws -> BrowserEngine
     func updateEngine(camoufox: String) async throws
     func cancelEngineUpdate() async throws
+    func switchEngineNow() async throws
     func restartBrowser() async throws -> BrowserIdentity
 }
 

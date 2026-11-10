@@ -150,6 +150,31 @@ final class BrowserModelTests: XCTestCase {
         XCTAssertEqual(removed.tabs.map(\.id), ["a", "b"])
     }
 
+    /// 2026-11-11 (user: 如果浏览器更新需要手动确认或者要等到浏览器手动关闭才能升级版本的话需要在浏览器图标上显示事件提示).
+    func testAnEngineThatWaitsForThePersonMarksThePageAsWaiting() throws {
+        let held = try JSONDecoder().decode(BrowserTabList.self, from: Data(#"{"running":true,"groups":[],"engine":"camoufox","windows":true,"engineNotice":"held"}"#.utf8))
+        XCTAssertEqual(held.engineNotice, "held")
+        XCTAssertEqual(PageActivity.of(held).mark, .waiting)
+        let quiet = try JSONDecoder().decode(BrowserTabList.self, from: Data(#"{"running":true,"groups":[],"engine":"camoufox","windows":true}"#.utf8))
+        XCTAssertNil(quiet.engineNotice)
+        XCTAssertEqual(PageActivity.of(quiet).mark, .none)
+        // A copy of the list made between two polls keeps what the service said of the browser.
+        let tab = BrowserTab(id: "a")
+        let list = BrowserTabList(running: true, groups: [BrowserTabGroup(owner: .you, tabs: [tab])], engine: "camoufox", windows: true, engineNotice: "available")
+        for copy in [list.replacing(tab), list.removing("zz")] {
+            XCTAssertEqual(copy.engine, "camoufox")
+            XCTAssertTrue(copy.windows)
+            XCTAssertEqual(copy.engineNotice, "available")
+        }
+    }
+
+    func testAnUpdateThatWaitsForTheTabsSaysSo() throws {
+        let update = try JSONDecoder().decode(BrowserEngineUpdate.self, from: Data(#"{"running":true,"phase":"switch","held":"tabs"}"#.utf8))
+        XCTAssertEqual(update.held, "tabs")
+        XCTAssertEqual(BrowserEngineText.progress(update), "waiting for tabs to close")
+        XCTAssertEqual(BrowserEngineText.progress(BrowserEngineUpdate(running: true, phase: "switch")), "switching")
+    }
+
     func testActivityCountsAgentsAtWorkAndWaiting() {
         let list = BrowserTabList(running: true, groups: [BrowserTabGroup(owner: .you, tabs: [
             BrowserTab(id: "a", status: .busy), BrowserTab(id: "b", status: .waiting), BrowserTab(id: "c"), BrowserTab(id: "d", status: .busy),

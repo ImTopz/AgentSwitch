@@ -139,6 +139,14 @@ final class BrowserIdentityModel {
         }
     }
 
+    /// `Switch Now`: the build that waits for the tabs to be closed is switched to at once.
+    func switchNow() {
+        run(.engine) { [self] service in
+            try await service.switchEngineNow()
+            take(try await service.browserEngine(check: false))
+        }
+    }
+
     func cancelUpdate() {
         run(.engine) { [self] service in
             try await service.cancelEngineUpdate()

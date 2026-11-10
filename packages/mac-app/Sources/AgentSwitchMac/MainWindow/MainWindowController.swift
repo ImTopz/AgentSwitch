@@ -315,7 +315,7 @@ final class MainWindowController: NSObject {
         let kept: UserDefaults? = node == nil ? .standard : nil
         let browser = BrowserPageModel(service: { [model] in model.client(on: node) }, state: state, defaults: kept, sealer: sealer)
         if node != nil {
-            browser.streamOnly = true
+            browser.remote = true
             browser.screenID = TerminalSizeHolder.screen(onNodeAs: model.client(on: node).screenOwner, unique: "main")
         }
         browser.onTitle = { [weak self] in self?.updateTitle() }

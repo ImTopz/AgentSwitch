@@ -234,12 +234,16 @@ public struct BrowserTabList: Sendable, Equatable, Decodable {
     /// The tabs have windows of their own on this Mac: the page lists them and brings windows forward instead of
     /// drawing their pictures.
     public let windows: Bool
+    /// What about the engine waits for the person (the service's `notice`): `held` — a newer build is ready and waits
+    /// for every tab to be closed —, `available` — a newer build that nothing is fetching; nil: nothing.
+    public let engineNotice: String?
 
-    public init(running: Bool = false, groups: [BrowserTabGroup] = [], engine: String = "chrome", windows: Bool = false) {
+    public init(running: Bool = false, groups: [BrowserTabGroup] = [], engine: String = "chrome", windows: Bool = false, engineNotice: String? = nil) {
         self.running = running
         self.groups = groups
         self.engine = engine
         self.windows = windows
+        self.engineNotice = engineNotice
     }
 
     public init(from decoder: Decoder) throws {
@@ -248,6 +252,7 @@ public struct BrowserTabList: Sendable, Equatable, Decodable {
         groups = (c.first([BrowserTabGroup].self, "groups") ?? []).filter { !$0.tabs.isEmpty }
         engine = c.first(String.self, "engine") ?? "chrome"
         windows = c.first(Bool.self, "windows") ?? false
+        engineNotice = c.first(String.self, "engineNotice")
     }
 
     public static let empty = BrowserTabList()
@@ -265,7 +270,7 @@ public struct BrowserTabList: Sendable, Equatable, Decodable {
     public func replacing(_ tab: BrowserTab) -> BrowserTabList {
         BrowserTabList(running: running, groups: groups.map { group in
             BrowserTabGroup(owner: group.owner, tabs: group.tabs.map { $0.id == tab.id ? tab : $0 })
-        })
+        }, engine: engine, windows: windows, engineNotice: engineNotice)
     }
 
     /// The list without a tab (closed); a group left empty goes too.
@@ -273,7 +278,7 @@ public struct BrowserTabList: Sendable, Equatable, Decodable {
         BrowserTabList(running: running, groups: groups.compactMap { group in
             let tabs = group.tabs.filter { $0.id != id }
             return tabs.isEmpty ? nil : BrowserTabGroup(owner: group.owner, tabs: tabs)
-        })
+        }, engine: engine, windows: windows, engineNotice: engineNotice)
     }
 
     /// The tab to show: `wanted` while it is still there, else the one at the same place in the list (the next one,

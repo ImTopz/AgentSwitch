@@ -79,7 +79,9 @@ async function main(): Promise<void> {
   await sleep(2500);
   const events: BrowserEvent[] = [];
   // As another Mac asks: its display's 2 pixels a point, within a 1728 × 1117 display's pixels.
-  const stop = host.subscribe(tab.id, { quality: 70, fps: 15, scale: 2, maxWidth: 3456, maxHeight: 2234 }, (e) => events.push(e));
+  // `PROBE_FPS=30`: as the Mac that runs the browser asks (15: another Mac, a phone).
+  const fps = Number(process.env.PROBE_FPS ?? 15);
+  const stop = host.subscribe(tab.id, { quality: 70, fps, scale: 2, maxWidth: 3456, maxHeight: 2234 }, (e) => events.push(e));
   const frames = (): FrameEvent[] => events.filter((e): e is FrameEvent => e.type === "frame");
   let shot = 0;
   /** The latest frame once the page has settled, with what it shows at CSS points. */
@@ -131,7 +133,7 @@ async function main(): Promise<void> {
   await page.evaluate("(() => { let y = 0; const t = setInterval(() => { scrollTo(0, y += 12); if (y > 2400) clearInterval(t); }, 16); })()");
   await sleep(3000);
   const got = frames().length - before;
-  console.log(`  ${got} frames in ${((Date.now() - began) / 1000).toFixed(1)} s for a stream asking 15 a second`);
+  console.log(`  ${got} frames in ${((Date.now() - began) / 1000).toFixed(1)} s for a stream asking ${fps} a second`);
   check("a moving page gives pictures steadily", got >= 15, `${got}`);
   const t0 = Date.now();
   for (let i = 0; i < 10; i++) await page.screenshot({ type: "jpeg", quality: 70, scale: "device", caret: "initial", animations: "allow" });

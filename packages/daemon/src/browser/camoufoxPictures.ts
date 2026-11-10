@@ -25,8 +25,10 @@ export function shotScale(view: { readonly width: number; readonly height: numbe
   return "device";
 }
 
-/** A page that moves is looked at this often at most (the host's acknowledgements pace it below that)… */
-export const SHOT_EVERY_MS = 50;
+/** A page that moves is looked at this often at most (the host's acknowledgements pace it below that: a stream that
+ *  asks 15 a second gets 15). 50 until 2026-11-11, which held every stream to 20 a second; a screen on the Mac that
+ *  runs the browser asks 30 (user: 本地的想办法弄的更加高效)… */
+export const SHOT_EVERY_MS = 33;
 /** …and one that stands still less and less often, down to this: what begins to move is seen within it. */
 export const SHOT_STILL_MS = 400;
 

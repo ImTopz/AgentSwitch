@@ -198,16 +198,25 @@ struct BrowserIdentityBox: View {
             .clipShape(RoundedRectangle(cornerRadius: look.isClassic ? 3 : 0))
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(BrowserEngineText.steps(update).enumerated()), id: \.offset) { _, step in
-                    let word = step.state == .now && update.phase == "download" ? (BrowserEngineText.progress(update) ?? step.word) : step.word
+                    let word = step.state == .now && (update.phase == "download" || update.held != nil) ? (BrowserEngineText.progress(update) ?? step.word) : step.word
                     Text("\(step.state == .done ? "■" : step.state == .now ? "▸" : "□") \(word)")
                         .foregroundStyle(step.state == .done ? Color.ok : step.state == .now ? Look.ink : Look.faint)
                 }
             }
             .code(12)
-            Button { model.cancelUpdate() } label: { BracketLabel(word: "Cancel") }
-                .buttonStyle(BracketButtonStyle())
-                .disabled(model.working != nil)
-                .padding(.top, 4)
+            if update.held != nil {
+                Text(BrowserEngineText.heldHint).font(.system(size: 12)).foregroundStyle(Color.waiting).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                if update.held != nil {
+                    Button { model.switchNow() } label: { BracketLabel(word: "Switch Now") }
+                        .buttonStyle(BracketButtonStyle(role: .primary))
+                }
+                Button { model.cancelUpdate() } label: { BracketLabel(word: "Cancel") }
+                    .buttonStyle(BracketButtonStyle())
+            }
+            .disabled(model.working != nil)
+            .padding(.top, 4)
         }
     }
 

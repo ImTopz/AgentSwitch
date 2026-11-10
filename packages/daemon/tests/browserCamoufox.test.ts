@@ -130,10 +130,12 @@ describe("the pictures of a Camoufox page (camoufoxPictures.ts; 2026-11-10: what
     const run = new PictureRun(p.source, { quality: 60 });
     await p.settle();
     await p.ack();
-    for (let i = 0; i < 5; i++) await p.next();
+    for (let i = 0; i < 6; i++) await p.next();
     expect(p.sent).toHaveLength(1);
-    expect(p.shots.length).toBeGreaterThanOrEqual(5);
-    expect(p.waits.slice(0, 5)).toEqual([SHOT_EVERY_MS, 2 * SHOT_EVERY_MS, 4 * SHOT_EVERY_MS, SHOT_STILL_MS, SHOT_STILL_MS]);
+    expect(p.shots.length).toBeGreaterThanOrEqual(6);
+    // Twice as long each time, up to the longest.
+    expect(p.waits.slice(0, 6)).toEqual([1, 2, 4, 8, 16, 32].map((n) => Math.min(SHOT_STILL_MS, n * SHOT_EVERY_MS)));
+    expect(p.waits[5]).toBe(SHOT_STILL_MS);
     // The same picture somewhere else is another picture.
     p.state.at = { width: 1280, height: 800, x: 0, y: 40 };
     await p.next();

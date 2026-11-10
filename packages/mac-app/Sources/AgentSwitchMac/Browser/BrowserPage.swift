@@ -140,7 +140,7 @@ private struct BrowserTabListView: View {
                                       select: { model.select(tab.id) },
                                       close: { Task { await model.close(tab.id) } },
                                       tag: model.windows ? BrowserWindowText.tag(tab) : nil,
-                                      open: model.windows ? { Task { await model.showWindow(tab.id) } } : nil)
+                                      open: model.windows || model.ownWindows ? { Task { await model.showWindow(tab.id) } } : nil)
                     }
                 }
             }

@@ -164,7 +164,10 @@ extension PageActivity {
     /// The Browser page's tabs: agents operating them (busy), agents waiting for you.
     public static func of(_ list: BrowserTabList) -> PageActivity {
         let tabs = list.tabs
-        return PageActivity(busy: tabs.filter { $0.status == .busy }.count, waiting: tabs.filter { $0.status == .waiting }.count)
+        // The engine waiting for the person is one more thing that waits there (2026-11-11, user: 如果浏览器更新需要手动
+        // 确认或者要等到浏览器手动关闭才能升级版本的话需要在浏览器图标上显示事件提示).
+        return PageActivity(busy: tabs.filter { $0.status == .busy }.count,
+                            waiting: tabs.filter { $0.status == .waiting }.count + (list.engineNotice == nil ? 0 : 1))
     }
 }
 
@@ -215,6 +218,9 @@ public enum BrowserDefaults {
     /// The stream asked for: the screen is on this Mac, so the daemon's 15 frames and a little more quality.
     public static let streamQuality = 80
     public static let streamFPS = 15
+    /// The stream of a browser on this very Mac: nothing between the two but the loopback, so as many as the service
+    /// gives (its most is 30).
+    public static let localStreamFPS = 30
     /// Moves and the wheel are sent at most this often (others at once).
     public static let motionInterval: Duration = .milliseconds(33)
     /// A held tab's size follows the screen once it has stopped changing this long.

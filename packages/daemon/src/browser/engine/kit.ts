@@ -23,7 +23,9 @@ export type EngineAvailable = {
 export type EngineStatus = {
   readonly camoufox: { readonly installed: Installed | null; /** Its program is there to start. */ readonly ready: boolean };
   readonly playwright: { readonly bundled: string; readonly installed: Installed | null; readonly active: "bundled" | "installed"; readonly version: string; readonly firefox: string | null };
-  readonly update: UpdateState;
+  /** `held: "tabs"`: a build fetched by itself is checked and ready, and waits for every tab to be closed before it is
+   *  switched to (`switchNow` does not wait). */
+  readonly update: UpdateState & { readonly held?: "tabs" };
   /** Since the last check. */
   readonly available?: EngineAvailable;
 };
@@ -88,6 +90,7 @@ export class EngineKit {
   /** The update under way was begun by `ensure` over an engine in use: it switches once no tab is open. */
   private quiet = false;
   private abandoned = false;
+  private holding = false;
   private autoCheckAfter = 0;
 
   constructor(opts: EngineKitOptions) {
@@ -123,13 +126,33 @@ export class EngineKit {
     // A browser's start is waiting for this very engine: there is no Camoufox to stop, and stopping the browser that
     // waits would wait for its own start.
     if (this.waiting > 0 || !this.switching) { apply(); return; }
-    if (this.quiet) {
-      while (this.idle && !this.idle()) {
+    try {
+      while (this.quiet && this.idle && !this.idle()) {
         if (this.abandoned) throw new Error("已取消。");
+        this.holding = true;
         await this.sleep(AUTO_SWITCH_POLL_MS);
       }
+    } finally {
+      this.holding = false;
     }
     await this.switching(apply);
+  }
+
+  /** The build that waits for the tabs to be closed is switched to now: the browsers stop and come back with their
+   *  tabs, as after a manual update. False: nothing was waiting. */
+  switchNow(): boolean {
+    if (!this.holding) return false;
+    this.quiet = false;
+    return true;
+  }
+
+  /** What about the engine is the person's to act on, for a mark where the browser is not on screen (the rail's
+   *  Browser icon; 2026-11-11, user: 如果浏览器更新需要手动确认或者要等到浏览器手动关闭才能升级版本的话需要在浏览器
+   *  图标上显示事件提示): a build that waits for the tabs to be closed, or a newer one that nothing is fetching. */
+  notice(): "held" | "available" | null {
+    if (this.holding) return "held";
+    if (!this.updater.state().running && this.available && this.notInstalled(this.available).camoufox) return "available";
+    return null;
   }
 
   /** Before a browser starts (docs/browser-v0.md §7.2 第 6 条, 2026-11-11; user: profile 需要用到浏览器时或者启动浏览器
@@ -198,7 +221,7 @@ export class EngineKit {
     return {
       camoufox: { installed: this.store.installed("camoufox"), ready: this.executable() !== null },
       playwright: { bundled: bundledPlaywright().version, installed: this.store.installed("playwright"), active: active.from, version: active.version, firefox: firefoxVersion(active) },
-      update: this.updater.state(),
+      update: { ...this.updater.state(), ...(this.holding ? { held: "tabs" as const } : {}) },
       ...(this.available ? { available: this.notInstalled(this.available) } : {}),
     };
   }

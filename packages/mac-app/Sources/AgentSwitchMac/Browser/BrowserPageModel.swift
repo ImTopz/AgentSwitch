@@ -78,9 +78,15 @@ final class BrowserPageModel {
     /// The holder name this page takes tabs over with: this Mac's main window, or — on another node's browser — a name
     /// after this Mac's device there.
     @ObservationIgnored var screenID = BrowserDefaults.screen
-    /// Another node's browser (docs/mesh-v0.md §5.2): its windows are on that machine, so here its tabs are always a
-    /// picture, as on a phone.
-    @ObservationIgnored var streamOnly = false
+    /// The tabs are pictures, as on a phone: the page draws the selected tab's stream and takes what is typed and
+    /// clicked. Another node's browser always (docs/mesh-v0.md §5.2: its windows are on that machine); this Mac's own
+    /// too since 2026-11-11 (user: 本地的浏览器显示应该也像是显示其他节点的浏览器一样有个串流页面) — until then a browser
+    /// with windows was a list here and its pages were in its windows. False only where the list is asked for (probes).
+    @ObservationIgnored var streamOnly = true
+    /// The browser is on another node.
+    @ObservationIgnored var remote = false
+    /// The tabs have windows on this Mac: a row can still bring its window forward.
+    var ownWindows: Bool { !remote && list.windows }
 
     /// The browser's tabs have windows of their own (docs/browser-v0.md §7.2): the page lists them and shows what
     /// AgentSwitch adds to the selected one; its picture is in its window, and nothing here takes or sizes it.
@@ -405,8 +411,11 @@ final class BrowserPageModel {
     private func streamOptions() -> BrowserStreamOptions {
         let window = screen.window
         let scale = Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
-        return BrowserScreenPolicy.stream(backingScale: scale, displayPoints: (window?.screen ?? NSScreen.main)?.frame.size,
-                                          zoom: zoom?.factor ?? 1, area: screen.bounds.size)
+        var options = BrowserScreenPolicy.stream(backingScale: scale, displayPoints: (window?.screen ?? NSScreen.main)?.frame.size,
+                                                 zoom: zoom?.factor ?? 1, area: screen.bounds.size)
+        // This Mac's own browser: nothing but the loopback between the two.
+        if !remote { options.fps = BrowserDefaults.localStreamFPS }
+        return options
     }
 
     /// The stream follows again when what it should ask for is no longer what it asked.

@@ -448,13 +448,39 @@ describe("the engine looks after itself as browsers start (docs/browser-v0.md §
     at += AUTO_CHECK_EVERY_MS;
     await k.ensure();
     await settle();
-    expect(k.status().update).toMatchObject({ running: true, phase: "switch" });
+    expect(k.status().update).toMatchObject({ running: true, phase: "switch", held: "tabs" });
+    expect(k.notice()).toBe("held");
     expect(k.status().camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.39`);
     expect(stopped).toBe(0);
     open = 0;
     expect(await k.settled()).toMatchObject({ ok: true });
     expect(stopped).toBe(1);
     expect(k.status().camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.41`);
+  });
+
+  it("a build waiting for the tabs to close is switched to at once when asked; a newer one nothing fetches is a notice too", async () => {
+    let at = 5000;
+    const { kit: k, releases, release } = kit({ auto: true, now: () => at });
+    expect(k.notice()).toBeNull();
+    expect(k.switchNow()).toBe(false);
+    await k.ensure();
+    let stopped = 0;
+    k.aroundSwitch(async (apply) => { stopped += 1; apply(); });
+    k.idleWhen(() => false);
+    releases.unshift(release(`${MAJOR}.0.1-beta.41`, false, 7));
+    // Found by a check nobody acted on: the person's to start.
+    await k.check();
+    expect(k.notice()).toBe("available");
+    at += AUTO_CHECK_EVERY_MS;
+    await k.ensure();
+    await settle();
+    expect(k.notice()).toBe("held");
+    expect(k.switchNow()).toBe(true);
+    expect(await k.settled()).toMatchObject({ ok: true });
+    expect(stopped).toBe(1);
+    expect(k.status().camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.41`);
+    expect(k.status().update.held).toBeUndefined();
+    expect(k.notice()).toBeNull();
   });
 
   it("a build waiting for the tabs to close can be cancelled: the one in use stays", async () => {

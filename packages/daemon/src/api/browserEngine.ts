@@ -22,6 +22,8 @@ export function mountBrowserEngine(app: Hono, deps: ApiDeps): void {
     const answer = await kit.update(body.data);
     return answer.ok ? c.json({ ok: true, ...kit.status() }, 202) : c.json({ error: answer.error }, answer.status);
   });
+  // The build that waits for the tabs to be closed, switched to now.
+  app.post("/browser/engine/switch", (c) => (kit.switchNow() ? c.json({ ok: true, ...kit.status() }) : c.json({ error: "没有正在等待切换的引擎。" }, 409)));
   app.post("/browser/engine/cancel", (c) => {
     kit.cancel();
     return c.json({ ok: true });
