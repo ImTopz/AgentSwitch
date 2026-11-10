@@ -71,7 +71,7 @@ struct TerminalRecordPane: View {
                                 }
                                 if !record.loaded {
                                     BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.top, 24)
-                                } else if record.items.isEmpty, record.sent.isEmpty, record.notices.isEmpty, !working, requests.isEmpty {
+                                } else if record.items.isEmpty, record.sent.isEmpty, record.notices.isEmpty, !working, requests.isEmpty, record.choices == nil {
                                     if !record.hasSession, info?.status == "exited" {
                                         // It ended before it had a session: it did not start (a sign-in that timed out, a
                                         // missing program). What it said is on its own screen.
@@ -122,14 +122,14 @@ struct TerminalRecordPane: View {
                                 }
                                 // A list of its own on its screen (Codex's `/model`, a question of its own): the same rows here.
                                 if let choices = record.choices, requests.isEmpty {
-                                    RecordChoiceCard(title: choices.title, rows: choices.options.map { ($0.label, $0.detail) }, selected: choices.selected,
+                                    RecordChoiceCard(said: choices.said, rows: choices.options.map { ($0.label, $0.detail) }, selected: choices.selected,
                                                      foot: "这是它自己屏幕上的列表：点一行，等于在终端里选中并回车。", openTerminal: { model.setSimple(false, pane: state.id) }) { record.choose($0) }
                                 } else if info?.status == "waiting", requests.isEmpty {
                                     RecordPromptNote(openTerminal: { model.setSimple(false, pane: state.id) })
                                 } else if !working, requests.isEmpty {
                                     // What its last message asks, with the answers it offers (Codex): one of them as your reply.
                                     ForEach(Array(record.openQuestions.enumerated()), id: \.offset) { _, question in
-                                        RecordChoiceCard(title: question.title, rows: question.options.map { ($0, nil) }, selected: nil,
+                                        RecordChoiceCard(said: ScreenChoices.said(title: question.title, text: nil), rows: question.options.map { ($0, nil) }, selected: nil,
                                                          foot: "点一个作为回复发出；也可以在下面自己写。", openTerminal: nil) { record.answer(question.options[$0]) }
                                     }
                                 }
@@ -470,7 +470,9 @@ private struct RecordNowLine: View {
 /// Rows to take one of: a list the agent's own screen shows, or the answers its last message offers. As the question
 /// card of a Claude Code question reads: what is asked, the rows numbered, a line on what taking one does.
 private struct RecordChoiceCard: View {
-    let title: String
+    /// What is asked, over the rows: the question, and with a list off the agent's screen whatever else it says there
+    /// (which folder, what trusting it allows — docs/simple-view-v0.md §5.17).
+    let said: [ScreenChoices.Line]
     let rows: [(label: String, detail: String?)]
     /// Where the selection stands on its screen (nil: nothing is selected, the rows are answers to send).
     let selected: Int?
@@ -482,8 +484,16 @@ private struct RecordChoiceCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !title.isEmpty {
-                Text(title).font(.system(size: Look.size(12.5, look), weight: .semibold)).foregroundStyle(Look.ink).fixedSize(horizontal: false, vertical: true)
+            if !said.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(said) { line in
+                        Text(line.text)
+                            .font(.system(size: Look.size(line.asks ? 12.5 : 12, look), weight: line.asks ? .semibold : .regular))
+                            .foregroundStyle(line.asks ? Look.ink : Look.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
             }
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in

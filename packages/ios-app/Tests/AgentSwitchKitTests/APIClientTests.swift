@@ -19,6 +19,12 @@ final class RotatingEndpoints: EndpointProviding, @unchecked Sendable {
 }
 
 final class APIClientTests: XCTestCase {
+    /// One session carries everything said to a Mac, its streams too, and iOS gives a host four connections unless
+    /// told otherwise: with four streams followed, nothing else got through (2026-11-10).
+    func testTheSessionMayHoldMoreConnectionsThanStreamsAreFollowed() {
+        XCTAssertGreaterThanOrEqual(PinnedSessionTransport.defaultConfiguration().httpMaximumConnectionsPerHost, 32)
+    }
+
     private let lan = APIEndpoint(host: "192.168.1.5", port: 4713, kind: .lan)
     private let tailnet = APIEndpoint(host: "fd7a:115c:a1e0::5", port: 4713, kind: .tailnet)
 

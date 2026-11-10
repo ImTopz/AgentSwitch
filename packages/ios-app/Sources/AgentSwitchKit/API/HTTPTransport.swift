@@ -74,8 +74,17 @@ public final class PinnedSessionTransport: HTTPTransport {
         config.urlCache = nil
         config.httpCookieStorage = nil
         config.urlCredentialStorage = nil
+        // A URL session opens at most 4 connections to one host on iOS unless told otherwise, and this one carries
+        // everything said to a Mac — its streams too, each holding a connection for as long as it is followed (a live
+        // task each, the terminal's, the browser tab's, a file on its way). With four streams open every other request
+        // waited for a connection until its own time ran out (2026-11-10; the Mac's side of the same: mac-app
+        // `URLSessionStreamTransport.maxConnections`).
+        config.httpMaximumConnectionsPerHost = maxConnections
         return config
     }
+
+    /// How many connections one paired Mac may be given at once.
+    public static let maxConnections = 64
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {

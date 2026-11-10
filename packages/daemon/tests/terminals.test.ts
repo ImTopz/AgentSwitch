@@ -590,6 +590,32 @@ describe("terminal host", () => {
     expect(() => host.choose(info.id, 0, "gpt-6-sol (current)")).toThrow(/no longer shows/);
   });
 
+  it("offers Claude Code's question about a folder — rows without numbers — and takes a row of it (2026-11-10)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), choiceLookMs: 30 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    await until(() => host.get(info.id)!.title === "fake agent");
+    host.write(info.id, "trust\r");
+    await until(() => host.get(info.id)!.choices !== null);
+    expect(host.get(info.id)!.choices).toEqual({
+      title: "Quick safety check: Is this a project you created or one you trust?", selected: 0,
+      options: [{ label: "No, exit" }, { label: "Yes, I trust this folder" }],
+      text: "Accessing workspace:\n/tmp/somewhere\nQuick safety check: Is this a project you created or one you trust?\nSecurity guide",
+    });
+    host.choose(info.id, 1, "Yes, I trust this folder");
+    await until(() => text(events).includes("folder: Yes, I trust this folder"));
+    await until(() => host.get(info.id)!.choices === null);
+    // A program that ends with its list still drawn (the question answered "No") leaves none behind.
+    host.write(info.id, "trust\r");
+    await until(() => host.get(info.id)!.choices !== null);
+    host.kill(info.id);
+    await until(() => host.get(info.id)!.status === "exited");
+    expect(host.get(info.id)!.choices).toBeNull();
+    expect(events.filter((e) => e.type === "choices").pop()).toEqual({ type: "choices", choices: null });
+  });
+
   it("says what the agent's screen printed for a command: the new lines above its input line (2026-10-08)", () => {
     const before = ["› 你好", "", "• 你好！有什么我可以帮你处理的？", "", "› Ask Codex to do anything", "  GPT-6-Sol high · ~/w"];
     expect(printedSince(before, ["› 你好", "", "• 你好！有什么我可以帮你处理的？", "", "• Daybreak off. Applies to new turns.", "", "› Ask Codex to do anything", "  GPT-6-Sol high · ~/w"]))
@@ -1485,6 +1511,22 @@ describe("terminals over HTTP", () => {
       expect((await call("POST", `/terminals/${id}/input`, { text: "看 [File #1]", seal: false, attachments: [attachment] })).status, JSON.stringify(attachment)).toBe(400);
     }
     expect((await call("DELETE", `/terminals/${id}`)).status).toBe(200);
+  });
+
+  it("takes no reply while an agent that has no session yet shows a list of its own: the folder question is answered by a row (2026-11-10)", async () => {
+    const { call, cwd } = await start();
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
+    const info = async () => (await call("GET", `/terminals/${id}`)).json.terminal;
+    await untilAsked(async () => (await info()).title === "fake agent");
+    expect((await call("POST", `/terminals/${id}/write`, { data: "trust\r" })).status).toBe(200);
+    await untilAsked(async () => (await info()).choices !== null);
+    expect((await info()).agentSessionId ?? null).toBeNull();
+    const refused = await call("POST", `/terminals/${id}/input`, { text: "hello" });
+    expect(refused.status).toBe(409);
+    expect(refused.json.code).toBe("choices");
+    expect((await call("POST", `/terminals/${id}/choices`, { pick: 1, label: "Yes, I trust this folder" })).status).toBe(200);
+    await untilAsked(async () => (await info()).choices === null);
+    expect((await call("POST", `/terminals/${id}/input`, { text: "hello" })).status).toBe(200);
   });
 
   it("a terminal opens in any folder, the home folder too, and reads the local token; tasks keep their rules (2026-09-30)", async () => {

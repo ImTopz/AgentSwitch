@@ -139,11 +139,39 @@ public struct ScreenChoices: Decodable, Hashable, Sendable {
     public let title: String
     public let options: [Option]
     public let selected: Int
+    /// All its screen says above the rows, a paragraph a line (a folder's question is several); nil when the title is
+    /// all of it, and from a Mac that does not say.
+    public let text: String?
 
-    public init(title: String, options: [Option], selected: Int) {
+    public init(title: String, options: [Option], selected: Int, text: String? = nil) {
         self.title = title
         self.options = options
         self.selected = selected
+        self.text = text
+    }
+
+    /// One line of what the list's card says over its rows; `asks`: the one that is the question.
+    public struct Line: Hashable, Sendable, Identifiable {
+        public let id: Int
+        public let text: String
+        public let asks: Bool
+
+        public init(id: Int, text: String, asks: Bool) {
+            self.id = id
+            self.text = text
+            self.asks = asks
+        }
+    }
+
+    /// What the card says over the rows: the screen's own lines with the question marked among them, or the title
+    /// alone. Lines that say nothing are left out; when none of them is the title, the first stands for it.
+    public var said: [Line] { Self.said(title: title, text: text) }
+
+    public static func said(title: String, text: String?) -> [Line] {
+        let lines = (text ?? "").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return title.isEmpty ? [] : [Line(id: 0, text: title, asks: true)] }
+        let asks = lines.firstIndex(of: title) ?? 0
+        return lines.enumerated().map { Line(id: $0.offset, text: $0.element, asks: $0.offset == asks) }
     }
 }
 

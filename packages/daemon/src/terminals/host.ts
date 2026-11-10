@@ -14,6 +14,7 @@ import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
 import { attachHeld, endHeld, HoldError, startHeld, type HoldPlace, type Holding } from "./held.js";
 import { keySequence, replyBytes, type KeyContext } from "./keys.js";
+import { choicesOnScreen, type ScreenChoices } from "./screenChoices.js";
 import { screenView } from "./screenView.js";
 
 export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
@@ -614,43 +615,7 @@ export function printedSince(before: readonly string[], after: readonly string[]
     .filter(Boolean).slice(-6).join("\n").slice(0, 600);
 }
 
-/** A list the agent draws on its own screen and waits on — Codex's `/model` (its models, then how hard each thinks),
- *  Claude Code's or Codex's question whether to trust a folder, any menu of theirs: numbered rows, one of them marked
- *  as where the selection stands. A screen that shows the record offers the same rows; taking one moves the selection
- *  there with the arrow keys and enters it, as in the terminal (2026-10-08, user: /model直接在简略视图里出一个列表让我
- *  可以点就行了，逻辑和和在cli一致). */
-export type ScreenChoices = { readonly title: string; readonly options: readonly { readonly label: string; readonly detail?: string }[]; readonly selected: number };
-
-const CHOICE_ROW = /^\s*(?:[│|]\s*)?(?:([›❯>▶])\s+)?(\d{1,2})[.)]\s+(\S.*?)\s*(?:[│|]\s*)?$/u;
-const MAX_CHOICES = 40;
-
-/** The list on the screen's last rows, if it shows one: rows numbered 1, 2, 3… in order (a row between two of them
- *  that has no number continues the one above), exactly one with the selection's mark before its number, and the
- *  nearest line above them as what is asked. Numbered lines in an answer have no such mark: not a list to choose from. */
-export function choicesOnScreen(lines: readonly string[]): ScreenChoices | null {
-  let end = -1;
-  for (let i = lines.length - 1; i >= 0 && end < 0; i--) if (CHOICE_ROW.test(lines[i]!)) end = i;
-  if (end < 0) return null;
-  const rows: { at: number; n: number; marked: boolean; text: string }[] = [];
-  for (let i = end; i >= 0 && end - i < 4 * MAX_CHOICES; i--) {
-    const m = CHOICE_ROW.exec(lines[i]!);
-    if (!m) { if (!lines[i]!.trim()) break; continue; }
-    rows.unshift({ at: i, n: Number(m[2]), marked: !!m[1], text: m[3]! });
-    if (Number(m[2]) === 1) break;
-  }
-  if (!rows.length || rows.length > MAX_CHOICES || rows.some((r, i) => r.n !== i + 1) || rows.filter((r) => r.marked).length !== 1) return null;
-  // A single row is a list only where the screen says under it how to take it (Codex: `enter select · esc back`);
-  // by itself it may be what you typed after your own prompt mark.
-  if (rows.length === 1 && !lines.slice(end + 1, end + 5).some((l) => /\benter\b.*\b(select|confirm)|\besc\b.*\b(back|cancel)/i.test(l))) return null;
-  let title = "";
-  for (let i = rows[0]!.at - 1; i >= 0 && i >= rows[0]!.at - 4 && !title; i--) title = lines[i]!.replace(/^[\s│|╭╰─]+|[\s│|╮╯─]+$/gu, "").trim();
-  const options = rows.map((r) => {
-    const [label, ...rest] = r.text.split(/\s{2,}/);
-    const detail = rest.join(" ").trim();
-    return { label: label!.trim().slice(0, 200), ...(detail ? { detail: detail.slice(0, 300) } : {}) };
-  });
-  return { title: title.slice(0, 300), options, selected: rows.findIndex((r) => r.marked) };
-}
+export { choicesOnScreen, type ScreenChoices } from "./screenChoices.js";
 
 /** A reply a screen sent, kept until the agent's own record holds it. The record is what the screens show, and a
  *  message reaches it late: the agent writes it down only as its turn begins — seconds after, for a session's first —
@@ -1408,6 +1373,21 @@ export class TerminalHost {
     return out;
   }
 
+  /** The rows of the terminal's screen as they stand, blank ones too, without the blank ones after the last: a list
+   *  on it is read by where its rows are (`choicesOnScreen`). */
+  private screenAll(s: Session): string[] {
+    const buffer = s.term.buffer.active;
+    const out: string[] = [];
+    for (let y = buffer.baseY; y < buffer.baseY + s.term.rows; y++) out.push(buffer.getLine(y)?.translateToString(true).trimEnd() ?? "");
+    while (out.length && !out[out.length - 1]) out.pop();
+    return out;
+  }
+
+  /** The list its screen shows now to choose from, if any. */
+  private choicesNow(s: Session): ScreenChoices | null {
+    return s.status === "exited" ? null : choicesOnScreen(this.screenAll(s), s.term.cols);
+  }
+
   /** A screen asks the Claude Code in terminal `id` to ask in another way (docs/simple-view-v0.md §5.4 “换模式”). It
    *  has no command for a mode: ⇧Tab steps through the ones this session offers, and the line under its input names
    *  the one it is in. So the key is pressed and that line read, until it names `mode` — or it is back where it began
@@ -1965,7 +1945,7 @@ export class TerminalHost {
   async learnCommands(id: string): Promise<void> {
     const s = this.sessions.get(id);
     if (!s || s.learning || !s.program || this.learned.has(`${s.harness}\n${s.program}`)) return;
-    const ready = () => s.status === "idle" && !s.pending.size && !s.attention && !choicesOnScreen(this.screenTail(id, s.rows)) && inputEmpty(screenRows(s.term, s.rows));
+    const ready = () => s.status === "idle" && !s.pending.size && !s.attention && !this.choicesNow(s) && inputEmpty(screenRows(s.term, s.rows));
     if (!ready()) return;
     s.learning = true;
     const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -2011,7 +1991,7 @@ export class TerminalHost {
         if (!this.sessions.has(id) || s.status === "exited" || s.agentSessionId !== record) return;
         const after = this.screenTail(id, s.rows);
         // A list it opened is offered as one (`choices`), not said as a notice.
-        const text = choicesOnScreen(after) ? "" : printedSince(before, after);
+        const text = this.choicesNow(s) ? "" : printedSince(before, after);
         if (!text || text === told) return;
         const again = told !== "";
         told = text;
@@ -2028,7 +2008,7 @@ export class TerminalHost {
     s.choiceTimer = setTimeout(() => {
       s.choiceTimer = null;
       if (!this.sessions.has(s.id)) return;
-      const now = s.status === "exited" ? null : choicesOnScreen(this.screenTail(s.id, s.rows));
+      const now = this.choicesNow(s);
       if (JSON.stringify(now) === JSON.stringify(s.choices)) return;
       s.choices = now;
       s.emit({ type: "choices", choices: now });
@@ -2040,7 +2020,7 @@ export class TerminalHost {
    *  selection is moved to it with the arrow keys and entered. TerminalError "busy" when the list is gone or changed. */
   choose(id: string, pick: number, label: string): void {
     const s = this.need(id);
-    const now = s.status === "exited" ? null : choicesOnScreen(this.screenTail(id, s.rows));
+    const now = this.choicesNow(s);
     if (!now || now.options[pick]?.label !== label) throw new TerminalError("busy", "its screen no longer shows that choice");
     const ctx = this.keyContext(id);
     const step = keySequence(pick > now.selected ? "down" : "up", ctx);
@@ -2058,6 +2038,8 @@ export class TerminalHost {
     s.status = status;
     s.statusSince = this.o.now();
     if (status === "idle" || status === "exited") { s.activity = null; s.compactFrom = null; this.progressed(s, null); this.writes(s, null); }
+    // A program that ended asks nothing: the list its screen still shows (the folder question, answered "No") is gone.
+    if (status === "exited" && s.choices) { s.choices = null; s.emit({ type: "choices", choices: null }); }
     s.emit({ type: "status", status });
     this.sentRests(s);
     this.suggests(s);

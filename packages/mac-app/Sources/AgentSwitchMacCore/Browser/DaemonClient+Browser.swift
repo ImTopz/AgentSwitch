@@ -181,6 +181,8 @@ public final class URLSessionChunkTransport: NSObject, DispatchStreamingTranspor
         config.connectionProxyDictionary = [:]
         config.timeoutIntervalForResource = 7 * 24 * 3600
         config.urlCache = nil
+        // Every tab followed holds a connection to the same host (`URLSessionStreamTransport.maxConnections`).
+        config.httpMaximumConnectionsPerHost = URLSessionStreamTransport.maxConnections
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         session = URLSession(configuration: config, delegate: self, delegateQueue: queue)

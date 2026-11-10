@@ -322,6 +322,25 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(TerminalRecordEvent.decode(event: "sent", data: #"{"type":"sent","replies":[]}"#), .sent([]))
     }
 
+    /// A list on the agent's own screen with all it says above its rows (docs/simple-view-v0.md §5.17).
+    func testAListOffTheAgentsScreenDecodesWithWhatItAsks() {
+        let folder = #"{"type":"choices","choices":{"title":"Trust this folder? Codex can read, edit, and run files here.","options":[{"label":"Trust and continue"},{"label":"Quit"}],"selected":0,"text":"Folder access\n/tmp/w\nTrust this folder? Codex can read, edit, and run files here."}}"#
+        let asked = ScreenChoices(title: "Trust this folder? Codex can read, edit, and run files here.", options: [.init(label: "Trust and continue"), .init(label: "Quit")], selected: 0,
+                                  text: "Folder access\n/tmp/w\nTrust this folder? Codex can read, edit, and run files here.")
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "choices", data: folder), .choices(asked))
+        // The card's lines: the screen's own, the question marked among them.
+        XCTAssertEqual(asked.said.map(\.text), ["Folder access", "/tmp/w", "Trust this folder? Codex can read, edit, and run files here."])
+        XCTAssertEqual(asked.said.map(\.asks), [false, false, true])
+        // A list with a title alone (a service that says no more, Codex's `/model`): the title is the card's one line.
+        let model = #"{"type":"choices","choices":{"title":"Select Model and Effort","options":[{"label":"gpt-6-sol","detail":"Frontier model"}],"selected":0}}"#
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "choices", data: model), .choices(ScreenChoices(title: "Select Model and Effort", options: [.init(label: "gpt-6-sol", detail: "Frontier model")], selected: 0)))
+        XCTAssertEqual(ScreenChoices.said(title: "Select Model and Effort", text: nil), [.init(id: 0, text: "Select Model and Effort", asks: true)])
+        XCTAssertEqual(ScreenChoices.said(title: "", text: nil), [])
+        // Lines that do not hold the title as one of them (it was cut short): the first stands for it; blank ones go.
+        XCTAssertEqual(ScreenChoices.said(title: "A long question that was cu", text: "A long question that was cut\n\n  and what it means ").map(\.asks), [true, false])
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "choices", data: #"{"type":"choices","choices":null}"#), .choices(nil))
+    }
+
     func testTurnTokensReadAsTheAgentsOwnLine() {
         XCTAssertNil(RecordDisplay.turnTokens(nil))
         XCTAssertNil(RecordDisplay.turnTokens(TurnProgress(tokens: 0)))

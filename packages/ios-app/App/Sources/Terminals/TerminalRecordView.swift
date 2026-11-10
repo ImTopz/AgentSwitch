@@ -66,7 +66,7 @@ struct TerminalRecordView: View {
                     }
                     if !record.loaded {
                         BrailleSpinner(color: .secondary).frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
-                    } else if record.items.isEmpty && page.sent.isEmpty && page.notices.isEmpty && page.status != .working && page.permissions.isEmpty {
+                    } else if record.items.isEmpty && page.sent.isEmpty && page.notices.isEmpty && page.status != .working && page.permissions.isEmpty && page.choices == nil {
                         if !record.hasSession && page.status == .exited {
                             // It ended before it had a session: it did not start. What it said is on its own screen.
                             VStack(alignment: .leading, spacing: 10) {
@@ -108,13 +108,13 @@ struct TerminalRecordView: View {
                     }
                     // A list of its own on its screen (Codex's `/model`, a question of its own): the same rows here.
                     if let choices = page.choices, page.permissions.isEmpty {
-                        choiceCard(title: choices.title, rows: choices.options.map { ($0.label, $0.detail) }, selected: choices.selected,
+                        choiceCard(said: choices.said, rows: choices.options.map { ($0.label, $0.detail) }, selected: choices.selected,
                                    foot: "这是它自己屏幕上的列表：点一行，等于在终端里选中并回车。") { pick in Task { await page.choose(pick) } }
                     } else if prompting { promptCard }
                     else if !working && page.permissions.isEmpty {
                         // What its last message asks, with the answers it offers (Codex): one of them as your reply.
                         ForEach(Array(RecordQuestion.open(items: record.items, sent: page.sent).enumerated()), id: \.offset) { _, question in
-                            choiceCard(title: question.title, rows: question.options.map { ($0, nil) }, selected: nil,
+                            choiceCard(said: ScreenChoices.said(title: question.title, text: nil), rows: question.options.map { ($0, nil) }, selected: nil,
                                        foot: "点一个作为回复发出；也可以在下面自己写。") { pick in Task { _ = await page.send(question.options[pick], sealed: false) } }
                         }
                     }
@@ -187,9 +187,21 @@ struct TerminalRecordView: View {
     }
 
     /// Rows to take one of: a list the agent's own screen shows, or the answers its last message offers.
-    private func choiceCard(title: String, rows: [(label: String, detail: String?)], selected: Int?, foot: String, take: @escaping (Int) -> Void) -> some View {
+    private func choiceCard(said: [ScreenChoices.Line], rows: [(label: String, detail: String?)], selected: Int?, foot: String, take: @escaping (Int) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !title.isEmpty { Text(title).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true) }
+            // What is asked: the question, and with a list off the agent's screen whatever else it says there (which
+            // folder, what trusting it allows — docs/simple-view-v0.md §5.17).
+            if !said.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(said) { line in
+                        Text(line.text)
+                            .font(line.asks ? .subheadline.weight(.semibold) : .footnote)
+                            .foregroundStyle(line.asks ? Color.primary : Color.secondary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
             VStack(spacing: 6) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                     Button { take(index) } label: {

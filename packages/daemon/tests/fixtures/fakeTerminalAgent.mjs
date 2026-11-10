@@ -87,6 +87,8 @@ async function handle(line) {
   // A list of its own to choose from (Codex's `/model`): numbered rows, the selection's mark on one; the keys it gets
   // while the list is up move the mark and enter it.
   if (line === "menu") { menu = 0; drawMenu(); return; }
+  // Claude Code's question about a folder it has not seen (2.1.299): rows without numbers, the mark on "No".
+  if (line === "trust") { trust = 0; drawTrust(); return; }
   // Claude Code while it works: its line with a clock and the tokens so far, on a row it redraws (`working 1.3k`).
   if (line.startsWith("working ")) { process.stdout.write(`\r\x1b[2K✻ Pondering… (12s · ↓ ${line.slice(8)} tokens · thought for 2s)`); return; }
   // Claude Code while it compacts its context: its own line with a clock, on a row it redraws; gone when done.
@@ -112,6 +114,13 @@ const MENU = ["gpt-6-sol (current)   Frontier model", "gpt-6-luna            Fas
 function drawMenu() {
   process.stdout.write("\r\n  Select Model and Effort\r\n" + MENU.map((row, i) => `${i === menu ? "› " : "  "}${i + 1}. ${row}`).join("\r\n") + "\r\n  Press enter to confirm or esc to go back\r\n");
 }
+// The folder question (`trust`): where its mark stands, or null when it is not up.
+let trust = null;
+const TRUST = ["No, exit", "Yes, I trust this folder"];
+function drawTrust() {
+  process.stdout.write("\x1b[2J\x1b[H" + "─".repeat(60) + "\r\n Accessing workspace:\r\n\r\n /tmp/somewhere\r\n\r\n Quick safety check: Is this a project you created or one you trust?\r\n\r\n Security guide\r\n\r\n"
+    + TRUST.map((row, i) => ` ${i === trust ? "❯" : " "} ${row}`).join("\r\n") + "\r\n\r\n Enter to confirm · Esc to cancel\r\n");
+}
 // Its own list of commands (`FAKE_SLASH=1`): `/` typed into the empty input pops it up, three rows at a time; the
 // arrow keys walk it, a backspace takes the `/` out.
 const SLASH = [["model", "choose what model and reasoning effort to use"], ["daybreak", "turn Daybreak on or off"], ["new", "start a new chat"], ["compact", "summarize the conversation"],
@@ -130,6 +139,14 @@ process.stdin.on("data", (d) => {
       if (slash === null) break;
       if (key === "\x7f") { slash = null; process.stdout.write("\x1b[2J\x1b[H› \x1b[2mAsk anything\x1b[22m\r\n"); }
       else { slash = (slash + (key.endsWith("B") ? 1 : SLASH.length - 1)) % SLASH.length; drawSlash(); }
+    }
+    return;
+  }
+  if (trust !== null) {
+    for (const key of String(d).match(/\x1b[\[O][AB]|\r|\n/g) ?? []) {
+      if (trust === null) break;
+      if (key === "\r" || key === "\n") { process.stdout.write(`\x1b[2J\x1b[Hfolder: ${TRUST[trust]}\r\n`); trust = null; }
+      else { trust = Math.max(0, Math.min(TRUST.length - 1, trust + (key.endsWith("B") ? 1 : -1))); drawTrust(); }
     }
     return;
   }

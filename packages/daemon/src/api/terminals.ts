@@ -594,6 +594,10 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const info = host.get(id);
     if (!info) return c.json({ error: "not found" }, 404);
     if (info.status === "exited") return c.json({ error: `terminal ${id} has ended` }, 409);
+    // An agent that has not begun a session shows a question of its own first — whether to trust the folder. A reply
+    // typed into that list answers it: enter takes whichever row the mark is on, which for Codex is "Trust and
+    // continue" (docs/simple-view-v0.md §5.17). A row is taken with `/choices`, or on its own screen.
+    if (!info.agentSessionId && info.choices) return c.json({ error: "终端正在等你选择，请先在列表中选一项。", code: "choices" }, 409);
     const text = body.data.text;
     // The placeholders in the text that have a file, in order: the text is pasted between them, each file's path on its
     // own (as a file dragged into a Mac terminal), then Enter.

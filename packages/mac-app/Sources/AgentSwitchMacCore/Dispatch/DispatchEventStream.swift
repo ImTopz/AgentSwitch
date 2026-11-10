@@ -40,12 +40,27 @@ public struct URLSessionStreamTransport: DispatchStreamingTransport {
 
     public static let shared = URLSessionStreamTransport()
 
-    public init() {
+    /// How many streams may be open to the service at once. A URL session opens at most 6 connections to one host
+    /// unless told otherwise, and every stream here goes to the same one — the local service, another node's through it
+    /// too — and holds its connection for as long as it is followed: a pane's record, a live task, a browser tab. The
+    /// seventh waited for a connection that never came free and gave up after its idle limit, again and again, so a
+    /// pane's record stood still and the reply just sent from it was nowhere to be seen (2026-11-10, user: 简略模式我
+    /// 刚才发的消息被吃掉了; measured with a session of its own against a server that never ends its answers: six
+    /// streams answered at once, three more timed out after 30 s, and a plain request on the same session after 10).
+    public static let maxConnections = 256
+
+    /// The session's set-up: loopback only, no cache, as many connections as there are streams.
+    public static func configuration() -> URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral
         config.connectionProxyDictionary = [:]
         config.timeoutIntervalForResource = 7 * 24 * 3600
         config.urlCache = nil
-        session = URLSession(configuration: config)
+        config.httpMaximumConnectionsPerHost = maxConnections
+        return config
+    }
+
+    public init() {
+        session = URLSession(configuration: Self.configuration())
     }
 
     public func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
