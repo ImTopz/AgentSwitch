@@ -6,7 +6,7 @@
 import { join } from "node:path";
 import { camoufoxExecutable, downloadArchive, unpackArchive } from "./files.js";
 import { activePlaywright, bundledPlaywright, firefoxVersion, type PlaywrightCopy } from "./loader.js";
-import { camoufoxReleases, newestCamoufox, playwrightRelease, type CamoufoxRelease } from "./releases.js";
+import { camoufoxReleases, isNewerCamoufox, newestCamoufox, playwrightRelease, type CamoufoxRelease } from "./releases.js";
 import { EngineStore, type Installed } from "./store.js";
 import { EngineUpdater, type EngineSource, type UpdateDeps, type UpdateState } from "./update.js";
 
@@ -135,8 +135,10 @@ export class EngineKit {
   async check(opts: { readonly prerelease?: boolean | undefined } = {}): Promise<EngineStatus> {
     try {
       const firefox = firefoxVersion(this.playwright());
-      const newest = firefox ? newestCamoufox(await this.releases(), { firefox, ...(opts.prerelease ? { prerelease: true } : {}) }) : null;
-      const fresh = newest && newest.version !== this.store.installed("camoufox")?.version ? newest : null;
+      const list = await this.releases();
+      const newest = firefox ? newestCamoufox(list, { firefox, ...(opts.prerelease ? { prerelease: true } : {}) }) : null;
+      // Only a build after the one installed is an update: the newest that is not a pre-release may be an older one.
+      const fresh = newest && isNewerCamoufox(newest, this.store.installed("camoufox")?.version, list) ? newest : null;
       this.available = { camoufox: fresh && { version: fresh.version, bytes: fresh.bytes, prerelease: fresh.prerelease }, checkedAt: this.now() };
     } catch (err) {
       this.available = { camoufox: null, checkedAt: this.now(), problem: `无法读取可用的版本：${(err as Error).message}` };
@@ -170,6 +172,10 @@ export class EngineKit {
         const source = req.camoufox === "latest"
           ? (firefox ? newestCamoufox(list, { firefox, ...(req.prerelease ? { prerelease: true } : {}) }) : null)
           : list.find((r) => r.version === req.camoufox) ?? null;
+        // `latest` never goes back: a build named outright may (that is how one returns to an older build).
+        if (source && req.camoufox === "latest" && !isNewerCamoufox(source, this.store.installed("camoufox")?.version, list)) {
+          return refuse(`已安装的 Camoufox ${this.store.installed("camoufox")?.version ?? ""} 不比可用的 ${source.version} 旧，无需更新。`);
+        }
         if (!source) return refuse(req.camoufox === "latest" ? `没有适用于 Firefox ${firefox ?? "?"} 的 Camoufox 构建。` : `未找到 Camoufox ${req.camoufox}（或它没有公布校验值）。`);
         if (!req.playwright && firefox && source.version.split(".")[0] !== firefox.split(".")[0]) {
           return refuse(`Camoufox ${source.version} 与当前的 Playwright 不相容：它驱动的是 Firefox ${firefox.split(".")[0]}。`);

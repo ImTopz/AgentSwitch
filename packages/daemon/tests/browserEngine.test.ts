@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { EngineStore } from "../src/browser/engine/store.js";
 import { EngineUpdater, type EngineSource, type UpdateDeps } from "../src/browser/engine/update.js";
-import { camoufoxReleases, firefoxOf, newestCamoufox, playwrightRelease } from "../src/browser/engine/releases.js";
+import { camoufoxReleases, firefoxOf, isNewerCamoufox, newestCamoufox, playwrightRelease } from "../src/browser/engine/releases.js";
 
 const root = () => join(realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-engine-"))), "engine");
 const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
@@ -214,6 +214,20 @@ describe("what can be installed (docs/browser-v0.md §7.2 第 6 条)", () => {
     expect(newestCamoufox(list, { firefox: "156.0", prerelease: true })?.version).toBe("156.0.1-beta.35");
     expect(newestCamoufox(list, { firefox: "152.0" })?.version).toBe("152.0.4-beta.28");
     expect(newestCamoufox(list, { firefox: "140.0" })).toBeNull();
+  });
+
+  it("offers only a build after the one installed: the newest that is not a pre-release can be an older one", () => {
+    const list = camoufoxReleases(releases, { platform: "darwin", arch: "arm64" });
+    const stable = newestCamoufox(list, { firefox: "156.0" })!;
+    // beta.35 (a pre-release) installed, beta.34 the newest that is not: nothing to update to.
+    expect(isNewerCamoufox(stable, "156.0.1-beta.35", list)).toBe(false);
+    expect(isNewerCamoufox(stable, "156.0.1-beta.34", list)).toBe(false);
+    expect(isNewerCamoufox(stable, "152.0.4-beta.28", list)).toBe(true);
+    expect(isNewerCamoufox(stable, null, list)).toBe(true);
+    // A name without a build number: by when the two were published; unknown here: any other build is an update.
+    expect(isNewerCamoufox({ ...stable, version: "156.0.2", publishedAt: stable.publishedAt + 1 }, "156.0.1-beta.34", list)).toBe(true);
+    expect(isNewerCamoufox({ ...stable, version: "156.0.2", publishedAt: stable.publishedAt - 1 }, "156.0.1-beta.34", list)).toBe(false);
+    expect(isNewerCamoufox(stable, "nightly", list)).toBe(true);
   });
 
   it("reads which Firefox a Playwright drives from its own list of browsers", () => {

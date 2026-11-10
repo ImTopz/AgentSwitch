@@ -44,6 +44,15 @@ final class NativeTerminalView: TerminalView {
         return true
     }
 
+    /// ⌘C with nothing selected here leaves the clipboard as it is. SwiftTerm's own `copy` empties it first and writes
+    /// the selection's text, which is "" when there is none — and a program that tracks the mouse (Claude Code's
+    /// fullscreen view, OpenCode) selects by itself and has just put its selection there (OSC 52): the ⌘C pressed after
+    /// it, by habit, threw that away (2026-11-11, user: 有几个用户反馈终端复制不了).
+    override func copy(_ sender: Any) {
+        guard selectionActive, let text = getSelection(), !text.isEmpty else { return }
+        super.copy(sender)
+    }
+
     override func mouseDown(with event: NSEvent) {
         owner?.userActed()
         owner?.onClick()

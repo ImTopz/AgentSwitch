@@ -40,6 +40,22 @@ export function newestCamoufox(list: readonly CamoufoxRelease[], want: { readonl
   return list.find((r) => r.version.split(".")[0] === major && (want.prerelease || !r.prerelease)) ?? null;
 }
 
+/** Camoufox numbers its builds in order, whatever Firefox they are of: `156.0.1-beta.39` is build 39. */
+const build = (version: string): number | null => { const m = /beta\.(\d+)$/.exec(version); return m ? Number(m[1]) : null; };
+
+/** Whether `candidate` is a build after the one installed. The newest build GitHub does not mark a pre-release can be
+ *  older than what is installed — 156.0.1-beta.39 (a pre-release) installed, 156.0.1-beta.36 the newest that is not —
+ *  and offering that as an update was offering to go back (2026-11-11, user: 这个升级怎么越升级版本越小). By the
+ *  build's number; where a name has none, by when the two were published; unknown either way: any other build is. */
+export function isNewerCamoufox(candidate: CamoufoxRelease, installed: string | null | undefined, list: readonly CamoufoxRelease[]): boolean {
+  if (!installed) return true;
+  if (candidate.version === installed) return false;
+  const mine = build(installed), theirs = build(candidate.version);
+  if (mine !== null && theirs !== null) return theirs > mine;
+  const have = list.find((r) => r.version === installed);
+  return have ? candidate.publishedAt > have.publishedAt : true;
+}
+
 /** Which Firefox a playwright-core drives, from its `browsers.json`. */
 export function firefoxOf(browsers: unknown): string | null {
   if (!isObject(browsers) || !Array.isArray(browsers.browsers)) return null;
