@@ -34,14 +34,28 @@ export function camoufoxReleases(body: unknown, host: { readonly platform: strin
   return found.sort((a, b) => b.publishedAt - a.publishedAt);
 }
 
-/** The newest build of Firefox `firefox` (as Playwright names it: `156.0`); pre-releases only when asked for. */
+/** The oldest Camoufox build this service works with: older ones are neither offered nor installed, whatever GitHub
+ *  marks them as (2026-11-11, user: 必须下载 beta.39 或者大于 beta.39 的 camoufox 浏览器，不然会出问题). */
+export const MIN_CAMOUFOX_BUILD = 39;
+
+/** Whether a version is one this service works with: its build number is `MIN_CAMOUFOX_BUILD` or more. A name without
+ *  a build number cannot be told to be too old and is let through. */
+export function camoufoxSupported(version: string): boolean {
+  const n = build(version);
+  return n === null || n >= MIN_CAMOUFOX_BUILD;
+}
+
+/** The newest build of Firefox `firefox` (as Playwright names it: `156.0`) that this service works with. One GitHub
+ *  does not mark a pre-release is preferred; where none of those is new enough — 156's newest is beta.36, below the
+ *  least — the newest pre-release that is, and with `prerelease` the newest of all. */
 export function newestCamoufox(list: readonly CamoufoxRelease[], want: { readonly firefox: string; readonly prerelease?: boolean }): CamoufoxRelease | null {
   const major = want.firefox.split(".")[0];
-  return list.find((r) => r.version.split(".")[0] === major && (want.prerelease || !r.prerelease)) ?? null;
+  const fit = list.filter((r) => r.version.split(".")[0] === major && camoufoxSupported(r.version));
+  return (want.prerelease ? undefined : fit.find((r) => !r.prerelease)) ?? fit[0] ?? null;
 }
 
 /** Camoufox numbers its builds in order, whatever Firefox they are of: `156.0.1-beta.39` is build 39. */
-const build = (version: string): number | null => { const m = /beta\.(\d+)$/.exec(version); return m ? Number(m[1]) : null; };
+function build(version: string): number | null { const m = /beta\.(\d+)$/.exec(version); return m ? Number(m[1]) : null; }
 
 /** Whether `candidate` is a build after the one installed. The newest build GitHub does not mark a pre-release can be
  *  older than what is installed — 156.0.1-beta.39 (a pre-release) installed, 156.0.1-beta.36 the newest that is not —

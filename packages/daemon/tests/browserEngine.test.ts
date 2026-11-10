@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { EngineStore } from "../src/browser/engine/store.js";
 import { EngineUpdater, type EngineSource, type UpdateDeps } from "../src/browser/engine/update.js";
-import { camoufoxReleases, firefoxOf, isNewerCamoufox, newestCamoufox, playwrightRelease } from "../src/browser/engine/releases.js";
+import { camoufoxReleases, camoufoxSupported, firefoxOf, MIN_CAMOUFOX_BUILD, isNewerCamoufox, newestCamoufox, playwrightRelease } from "../src/browser/engine/releases.js";
 
 const root = () => join(realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-engine-"))), "engine");
 const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
@@ -28,9 +28,9 @@ describe("the engine's folder (docs/browser-v0.md §7: one copy on disk)", () =>
 
   it("puts a new copy in place and deletes the one it replaces: one copy after, and what it says of itself", () => {
     const store = new EngineStore(root());
-    store.switchTo("camoufox", unpacked(store, "camoufox", "one"), { version: "156.0.1-beta.34", digest: "sha256:aa", bytes: 10, installedAt: 1 });
+    store.switchTo("camoufox", unpacked(store, "camoufox", "one"), { version: "156.0.1-beta.39", digest: "sha256:aa", bytes: 10, installedAt: 1 });
     expect(readFileSync(join(store.dir("camoufox"), "marker.txt"), "utf8")).toBe("one");
-    expect(store.installed("camoufox")).toEqual({ version: "156.0.1-beta.34", digest: "sha256:aa", bytes: 10, installedAt: 1 });
+    expect(store.installed("camoufox")).toEqual({ version: "156.0.1-beta.39", digest: "sha256:aa", bytes: 10, installedAt: 1 });
     store.switchTo("camoufox", unpacked(store, "camoufox", "two"), { version: "156.0.1-beta.36", digest: "sha256:bb", bytes: 12, installedAt: 2 });
     expect(readFileSync(join(store.dir("camoufox"), "marker.txt"), "utf8")).toBe("two");
     expect(store.installed("camoufox")?.version).toBe("156.0.1-beta.36");
@@ -130,7 +130,7 @@ describe("updating the engine (docs/browser-v0.md §7.2 第 6 条)", () => {
   });
 
   it("a pair that fails its own check is not switched to: the copy in use stays, the reason is told, nothing is left over", async () => {
-    const first = fox("camoufox 34", "156.0.1-beta.34"), next = fox("camoufox 36");
+    const first = fox("camoufox 34", "156.0.1-beta.39"), next = fox("camoufox 36");
     const { store, updater: u } = updater({}, { [first.url]: "camoufox 34", [next.url]: "camoufox 36" });
     u.start([first]);
     await u.done();
@@ -138,7 +138,7 @@ describe("updating the engine (docs/browser-v0.md §7.2 第 6 条)", () => {
     failing.start([next]);
     const end = await failing.done();
     expect(end).toMatchObject({ ok: false, phase: "check", error: "改尺寸时协议报错" });
-    expect(store.installed("camoufox")?.version).toBe("156.0.1-beta.34");
+    expect(store.installed("camoufox")?.version).toBe("156.0.1-beta.39");
     expect(readFileSync(join(store.dir("camoufox"), "marker.txt"), "utf8")).toBe("camoufox 34");
     expect(readdirSync(store.root)).toEqual(["camoufox"]);
   });
@@ -187,12 +187,12 @@ describe("updating the engine (docs/browser-v0.md §7.2 第 6 条)", () => {
 
 describe("what can be installed (docs/browser-v0.md §7.2 第 6 条)", () => {
   const releases = [
-    { tag_name: "v156.0.1-beta.35", prerelease: true, published_at: "2026-10-05T01:00:00Z", assets: [
-      { name: "camoufox-156.0.1-beta.35-mac.arm64.zip", size: 1289000000, digest: "sha256:35", browser_download_url: "https://github.test/35-arm.zip" }] },
-    { tag_name: "v156.0.1-beta.34", prerelease: false, published_at: "2026-10-03T01:00:00Z", assets: [
-      { name: "camoufox-156.0.1-beta.34-mac.arm64.zip", size: 1289764252, digest: "sha256:34", browser_download_url: "https://github.test/34-arm.zip" },
-      { name: "camoufox-156.0.1-beta.34-mac.x86_64.zip", size: 1297000000, digest: "sha256:34x", browser_download_url: "https://github.test/34-x86.zip" },
-      { name: "camoufox-156.0.1-beta.34-lin.x86_64.zip", size: 900000000, digest: "sha256:34l", browser_download_url: "https://github.test/34-lin.zip" }] },
+    { tag_name: "v156.0.1-beta.40", prerelease: true, published_at: "2026-10-05T01:00:00Z", assets: [
+      { name: "camoufox-156.0.1-beta.40-mac.arm64.zip", size: 1289000000, digest: "sha256:35", browser_download_url: "https://github.test/35-arm.zip" }] },
+    { tag_name: "v156.0.1-beta.39", prerelease: false, published_at: "2026-10-03T01:00:00Z", assets: [
+      { name: "camoufox-156.0.1-beta.39-mac.arm64.zip", size: 1289764252, digest: "sha256:34", browser_download_url: "https://github.test/34-arm.zip" },
+      { name: "camoufox-156.0.1-beta.39-mac.x86_64.zip", size: 1297000000, digest: "sha256:34x", browser_download_url: "https://github.test/34-x86.zip" },
+      { name: "camoufox-156.0.1-beta.39-lin.x86_64.zip", size: 900000000, digest: "sha256:34l", browser_download_url: "https://github.test/34-lin.zip" }] },
     { tag_name: "v152.0.4-beta.28", prerelease: false, published_at: "2026-07-19T01:00:00Z", assets: [
       { name: "camoufox-152.0.4-beta.28-mac.arm64.zip", size: 700000000, digest: "sha256:28", browser_download_url: "https://github.test/28-arm.zip" }] },
     { tag_name: "v157.0-beta.1", prerelease: false, published_at: "2026-10-06T01:00:00Z", assets: [
@@ -201,8 +201,8 @@ describe("what can be installed (docs/browser-v0.md §7.2 第 6 条)", () => {
 
   it("reads Camoufox's releases for this kind of Mac, newest first, leaving out builds without a published digest", () => {
     const list = camoufoxReleases(releases, { platform: "darwin", arch: "arm64" });
-    expect(list.map((r) => r.version)).toEqual(["156.0.1-beta.35", "156.0.1-beta.34", "152.0.4-beta.28"]);
-    expect(list[1]).toEqual({ part: "camoufox", version: "156.0.1-beta.34", url: "https://github.test/34-arm.zip", bytes: 1289764252, digest: "sha256:34", prerelease: false, publishedAt: Date.parse("2026-10-03T01:00:00Z") });
+    expect(list.map((r) => r.version)).toEqual(["156.0.1-beta.40", "156.0.1-beta.39", "152.0.4-beta.28"]);
+    expect(list[1]).toEqual({ part: "camoufox", version: "156.0.1-beta.39", url: "https://github.test/34-arm.zip", bytes: 1289764252, digest: "sha256:34", prerelease: false, publishedAt: Date.parse("2026-10-03T01:00:00Z") });
     expect(camoufoxReleases(releases, { platform: "darwin", arch: "x64" }).map((r) => r.url)).toEqual(["https://github.test/34-x86.zip"]);
     expect(camoufoxReleases(releases, { platform: "linux", arch: "x64" }).map((r) => r.url)).toEqual(["https://github.test/34-lin.zip"]);
     expect(camoufoxReleases({ message: "rate limited" }, { platform: "darwin", arch: "arm64" })).toEqual([]);
@@ -210,23 +210,37 @@ describe("what can be installed (docs/browser-v0.md §7.2 第 6 条)", () => {
 
   it("picks the newest build of the Firefox this Playwright drives; pre-releases only when asked", () => {
     const list = camoufoxReleases(releases, { platform: "darwin", arch: "arm64" });
-    expect(newestCamoufox(list, { firefox: "156.0" })?.version).toBe("156.0.1-beta.34");
-    expect(newestCamoufox(list, { firefox: "156.0", prerelease: true })?.version).toBe("156.0.1-beta.35");
-    expect(newestCamoufox(list, { firefox: "152.0" })?.version).toBe("152.0.4-beta.28");
+    expect(newestCamoufox(list, { firefox: "156.0" })?.version).toBe("156.0.1-beta.39");
+    expect(newestCamoufox(list, { firefox: "156.0", prerelease: true })?.version).toBe("156.0.1-beta.40");
     expect(newestCamoufox(list, { firefox: "140.0" })).toBeNull();
+  });
+
+  it("neither offers nor picks a build older than the least it works with; a pre-release where no other is new enough", () => {
+    const list = camoufoxReleases(releases, { platform: "darwin", arch: "arm64" });
+    expect(MIN_CAMOUFOX_BUILD).toBe(39);
+    expect(camoufoxSupported("156.0.1-beta.38")).toBe(false);
+    expect(camoufoxSupported("156.0.1-beta.39")).toBe(true);
+    expect(camoufoxSupported("158.0-beta.40")).toBe(true);
+    // Firefox 152's only build is 28: nothing to install.
+    expect(newestCamoufox(list, { firefox: "152.0" })).toBeNull();
+    // As GitHub had it on 2026-11-11: 36 the newest not marked a pre-release, 37–39 pre-releases. 39 is what is picked.
+    const at = (n: number, pre: boolean) => ({ part: "camoufox" as const, version: `156.0.1-beta.${n}`, url: `https://github.test/${n}.zip`, bytes: 1, digest: `sha256:${n}`, prerelease: pre, publishedAt: n });
+    const real = [at(39, true), at(38, true), at(37, true), at(36, false), at(35, true)];
+    expect(newestCamoufox(real, { firefox: "156.0" })?.version).toBe("156.0.1-beta.39");
+    expect(newestCamoufox(real.slice(1), { firefox: "156.0" })).toBeNull();
   });
 
   it("offers only a build after the one installed: the newest that is not a pre-release can be an older one", () => {
     const list = camoufoxReleases(releases, { platform: "darwin", arch: "arm64" });
     const stable = newestCamoufox(list, { firefox: "156.0" })!;
-    // beta.35 (a pre-release) installed, beta.34 the newest that is not: nothing to update to.
-    expect(isNewerCamoufox(stable, "156.0.1-beta.35", list)).toBe(false);
-    expect(isNewerCamoufox(stable, "156.0.1-beta.34", list)).toBe(false);
+    // beta.40 (a pre-release) installed, beta.39 the newest that is not: nothing to update to.
+    expect(isNewerCamoufox(stable, "156.0.1-beta.40", list)).toBe(false);
+    expect(isNewerCamoufox(stable, "156.0.1-beta.39", list)).toBe(false);
     expect(isNewerCamoufox(stable, "152.0.4-beta.28", list)).toBe(true);
     expect(isNewerCamoufox(stable, null, list)).toBe(true);
     // A name without a build number: by when the two were published; unknown here: any other build is an update.
-    expect(isNewerCamoufox({ ...stable, version: "156.0.2", publishedAt: stable.publishedAt + 1 }, "156.0.1-beta.34", list)).toBe(true);
-    expect(isNewerCamoufox({ ...stable, version: "156.0.2", publishedAt: stable.publishedAt - 1 }, "156.0.1-beta.34", list)).toBe(false);
+    expect(isNewerCamoufox({ ...stable, version: "156.0.2", publishedAt: stable.publishedAt + 1 }, "156.0.1-beta.39", list)).toBe(true);
+    expect(isNewerCamoufox({ ...stable, version: "156.0.2", publishedAt: stable.publishedAt - 1 }, "156.0.1-beta.39", list)).toBe(false);
     expect(isNewerCamoufox(stable, "nightly", list)).toBe(true);
   });
 
@@ -258,7 +272,7 @@ function kit(over: { selfCheck?: UpdateDeps["selfCheck"]; registry?: unknown } =
   const body = (v: string) => `camoufox ${v}`;
   const release = (v: string, prerelease = false, day = 1) => ({ tag_name: `v${v}`, prerelease, published_at: `2026-10-0${day}T00:00:00Z`, assets: [
     { name: `camoufox-${v}-mac.arm64.zip`, size: body(v).length, digest: sha256(body(v)), browser_download_url: `https://github.test/${v}.zip` }] });
-  const releases = [release(`${MAJOR}.0.1-beta.35`, true, 5), release(`${MAJOR}.0.1-beta.34`, false, 3), release("100.0-beta.1", false, 1)];
+  const releases = [release(`${MAJOR}.0.1-beta.40`, true, 5), release(`${MAJOR}.0.1-beta.39`, false, 3), release("100.0-beta.1", false, 1), release("100.0-beta.45", false, 2)];
   const asked: string[] = [];
   const k = new EngineKit({
     root: root(), platform: "darwin", arch: "arm64", now: () => 5000,
@@ -283,9 +297,9 @@ describe("the engine as the service has it (GET /browser/engine, POST /browser/e
 
   it("a check lists the newest build of the Firefox in use; pre-releases only when asked", async () => {
     const { kit: k, asked } = kit();
-    expect((await k.check()).available).toEqual({ camoufox: { version: `${MAJOR}.0.1-beta.34`, bytes: `camoufox ${MAJOR}.0.1-beta.34`.length, prerelease: false }, checkedAt: 5000 });
+    expect((await k.check()).available).toEqual({ camoufox: { version: `${MAJOR}.0.1-beta.39`, bytes: `camoufox ${MAJOR}.0.1-beta.39`.length, prerelease: false }, checkedAt: 5000 });
     expect(asked).toEqual(["https://api.github.com/repos/daijro/camoufox/releases?per_page=30"]);
-    expect((await k.check({ prerelease: true })).available?.camoufox?.version).toBe(`${MAJOR}.0.1-beta.35`);
+    expect((await k.check({ prerelease: true })).available?.camoufox?.version).toBe(`${MAJOR}.0.1-beta.40`);
   });
 
   it("a check that cannot reach the releases says so and offers nothing", async () => {
@@ -300,7 +314,7 @@ describe("the engine as the service has it (GET /browser/engine, POST /browser/e
     await k.settled();
     const s = k.status();
     expect(s.available?.camoufox, "what was offered before is not offered once it is installed").toBeNull();
-    expect(s.camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.34`);
+    expect(s.camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.39`);
     expect(s.update).toMatchObject({ running: false, ok: true });
     // Nothing to offer once the newest is in use.
     expect((await k.check()).available?.camoufox).toBeNull();
@@ -310,7 +324,8 @@ describe("the engine as the service has it (GET /browser/engine, POST /browser/e
     const { kit: k } = kit();
     expect(await k.update({})).toMatchObject({ ok: false, status: 400 });
     expect(await k.update({ camoufox: "1.2.3" })).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("1.2.3") });
-    expect(await k.update({ camoufox: "100.0-beta.1" })).toMatchObject({ ok: false, status: 400, error: expect.stringContaining(`Firefox ${MAJOR}`) });
+    expect(await k.update({ camoufox: "100.0-beta.1" })).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("beta.39") });
+    expect(await k.update({ camoufox: "100.0-beta.45" })).toMatchObject({ ok: false, status: 400, error: expect.stringContaining(`Firefox ${MAJOR}`) });
     expect(await k.update({ playwright: "9.9.9" })).toMatchObject({ ok: false, status: 400 });
     expect(k.status().update).toEqual({ running: false });
   });
@@ -332,7 +347,7 @@ describe("the engine as the service has it (GET /browser/engine, POST /browser/e
     });
     await k.update({ camoufox: "latest" });
     await k.settled();
-    expect(order).toEqual(["stop (installed: none)", `start (installed: ${MAJOR}.0.1-beta.34)`]);
+    expect(order).toEqual(["stop (installed: none)", `start (installed: ${MAJOR}.0.1-beta.39)`]);
     expect(k.status().update).toMatchObject({ ok: true });
   });
 
@@ -351,7 +366,7 @@ describe("the engine as the service has it (GET /browser/engine, POST /browser/e
     mountBrowserEngine(app, { engineKit: k } as unknown as ApiDeps);
     const json = async (r: Response | Promise<Response>) => (await r).json() as Promise<Record<string, any>>;
     expect((await json(app.request("/browser/engine"))).camoufox).toEqual({ installed: null, ready: false });
-    expect((await json(app.request("/browser/engine?check=1"))).available.camoufox.version).toBe(`${MAJOR}.0.1-beta.34`);
+    expect((await json(app.request("/browser/engine?check=1"))).available.camoufox.version).toBe(`${MAJOR}.0.1-beta.39`);
     const post = (path: string, body: unknown) => app.request(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     expect((await post("/browser/engine/update", { camoufox: "nope" })).status).toBe(400);
     expect((await post("/browser/engine/update", { camoufox: 5 })).status).toBe(400);

@@ -6,7 +6,7 @@
 import { join } from "node:path";
 import { camoufoxExecutable, downloadArchive, unpackArchive } from "./files.js";
 import { activePlaywright, bundledPlaywright, firefoxVersion, type PlaywrightCopy } from "./loader.js";
-import { camoufoxReleases, isNewerCamoufox, newestCamoufox, playwrightRelease, type CamoufoxRelease } from "./releases.js";
+import { camoufoxReleases, camoufoxSupported, isNewerCamoufox, MIN_CAMOUFOX_BUILD, newestCamoufox, playwrightRelease, type CamoufoxRelease } from "./releases.js";
 import { EngineStore, type Installed } from "./store.js";
 import { EngineUpdater, type EngineSource, type UpdateDeps, type UpdateState } from "./update.js";
 
@@ -172,6 +172,7 @@ export class EngineKit {
         const source = req.camoufox === "latest"
           ? (firefox ? newestCamoufox(list, { firefox, ...(req.prerelease ? { prerelease: true } : {}) }) : null)
           : list.find((r) => r.version === req.camoufox) ?? null;
+        if (source && !camoufoxSupported(source.version)) return refuse(`Camoufox ${source.version} 过旧：需要 beta.${MIN_CAMOUFOX_BUILD} 或更新的构建。`);
         // `latest` never goes back: a build named outright may (that is how one returns to an older build).
         if (source && req.camoufox === "latest" && !isNewerCamoufox(source, this.store.installed("camoufox")?.version, list)) {
           return refuse(`已安装的 Camoufox ${this.store.installed("camoufox")?.version ?? ""} 不比可用的 ${source.version} 旧，无需更新。`);
