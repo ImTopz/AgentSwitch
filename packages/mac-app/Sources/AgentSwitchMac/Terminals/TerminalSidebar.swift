@@ -44,9 +44,31 @@ struct TerminalSidebar: View {
                 .padding(.horizontal, look.isClassic ? 8 : 0)
             }
             .scrollIndicators(.never)
+            if model.selecting { SelectFoot(model: model) }
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background { if look.isClassic { Look.sidebar } else { ScanLines() } }
+    }
+}
+
+/// Under the list while sessions are being picked (docs/terminal-v0.md §5 批量删除): how many, `Delete`, `Done`.
+private struct SelectFoot: View {
+    let model: TerminalsModel
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        let count = model.pickedSessions.count
+        HStack(spacing: look.isClassic ? 6 : 4) {
+            Text(SessionDeleteWords.selected(count))
+                .font(.system(size: 11.5, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.ink2)
+            Spacer(minLength: 6)
+            if count > 0 { RowButton(word: "Delete", destructive: true) { model.deletePicked() } }
+            RowButton(word: "Done", primary: true) { model.endSelecting() }
+        }
+        .lineLimit(1)
+        .padding(.horizontal, look.isClassic ? 12 : 12)
+        .frame(height: look.isClassic ? 34 : 30)
+        .overlay(alignment: .top) { Rectangle().fill(Look.line).frame(height: 1) }
     }
 }
 
@@ -209,6 +231,11 @@ private struct FolderLine: View {
         .contextMenu {
             Button("New Terminal Here") { model.showCreate(folder: folder.cwd) }
             Button("Show in Files") { model.files?.show(folder: folder.cwd) }
+            let own = model.ownSessions(in: folder.cwd).count
+            if own > 0 {
+                Divider()
+                Button(own == 1 ? "Delete Session…" : "Delete All \(own) Sessions…", role: .destructive) { model.deleteAll(in: folder.cwd) }
+            }
         }
         .padding(.top, look.isClassic ? (folder.depth == 0 ? 6 : 0) : (folder.own || folder.depth == 0 ? 8 : 2))
     }
@@ -354,7 +381,7 @@ private struct TerminalRow: View {
             .help(look.isClassic ? "Close (⌘W)" : "Close ⌘W")
         }
         .onTapGesture(count: 2) { model.startRename(terminal.id) }
-        .simultaneousGesture(TapGesture().onEnded { model.open(.terminal(terminal.id), beside: NSEvent.modifierFlags.contains(.command)) })
+        .simultaneousGesture(TapGesture().onEnded { model.open(.terminal(terminal.id), beside: model.clickFlags.contains(.command)) })
         .onDrag {
             guard !out else { return NSItemProvider() }
             model.dragging = .terminal(terminal.id)
@@ -488,27 +515,36 @@ private struct SessionRow: View {
 
     private var resumable: Bool { TerminalListText.resumable.contains(session.harness) }
     private var opening: Bool { model.opening == session.sessionId }
+    private var picked: Bool { model.selecting && model.picked.contains(session.recordID) }
 
     var body: some View {
-        RowFrame(twig: twig, depth: depth, dimmed: opening) {
-            if look.isClassic { Image(systemName: "clock").font(.system(size: 11.5)).foregroundStyle(Look.faint) }
+        RowFrame(twig: twig, depth: depth, selected: picked, dimmed: opening) {
+            // While sessions are picked from, the row's mark is its box.
+            if model.selecting {
+                if look.isClassic {
+                    Image(systemName: picked ? "checkmark.circle.fill" : "circle").font(.system(size: 12.5)).foregroundStyle(picked ? Color.signal : Look.faint)
+                } else {
+                    Text(picked ? "■" : "□").font(.system(size: 12.5, design: .monospaced)).foregroundStyle(picked ? Color.signal : Look.faint)
+                }
+            } else if look.isClassic { Image(systemName: "clock").font(.system(size: 11.5)).foregroundStyle(Look.faint) }
         } name: {
             Text(ListLook.marked(session.title.isEmpty ? "(Untitled)" : session.title, query: model.query, classic: look.isClassic))
                 .font(look.isClassic ? .system(size: 13) : .system(size: 12.5, design: .monospaced))
                 .foregroundStyle(Look.ink2).truncationMode(.tail)
         } meta: {
-            HStack(spacing: look.isClassic ? 6 : 8) {
-                AgentSprite(harness: session.harness).opacity(0.75)
-                Text(opening ? "Opening" : session.active ? ClassicWords.word("Busy", in: look) : TerminalListText.age(since: session.updatedAt, classic: look.isClassic))
-                    .font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint)
-            }
+            rowMeta
         } actions: {
-            HStack(spacing: look.isClassic ? 4 : 2) {
-                if resumable { RowButton(word: "Resume", primary: true) { model.resume(session) } }
-                RowButton(word: "Delete", destructive: true) { model.delete(session) }
+            if model.selecting { rowMeta } else {
+                HStack(spacing: look.isClassic ? 4 : 2) {
+                    if resumable { RowButton(word: "Resume", primary: true) { model.resume(session) } }
+                    RowButton(word: "Delete", destructive: true) { model.delete(session) }
+                }
             }
         }
-        .onTapGesture { if resumable { model.open(.session(session), beside: NSEvent.modifierFlags.contains(.command)) } }
+        .onTapGesture {
+            if model.selecting { return model.pick(session, range: model.clickFlags.contains(.shift)) }
+            if resumable { model.open(.session(session), beside: model.clickFlags.contains(.command)) }
+        }
         .onDrag {
             guard resumable else { return NSItemProvider() }
             model.dragging = .session(session)
@@ -517,6 +553,15 @@ private struct SessionRow: View {
         .allowsHitTesting(!opening)
         .contextMenu { menu }
         .help("\(TerminalListText.agentName(session.harness)) · \(TerminalTree.tilde(session.cwd))\(own.map { " · \($0.name)" } ?? "")")
+    }
+
+    /// Its agent, and when it was last written.
+    private var rowMeta: some View {
+        HStack(spacing: look.isClassic ? 6 : 8) {
+            AgentSprite(harness: session.harness).opacity(0.75)
+            Text(opening ? "Opening" : session.active ? ClassicWords.word("Busy", in: look) : TerminalListText.age(since: session.updatedAt, classic: look.isClassic))
+                .font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint)
+        }
     }
 
     /// The agent's profiles, when there is more than the Mac's own, and the one this session last ran under.
@@ -542,7 +587,12 @@ private struct SessionRow: View {
         }
         Button("Show in Files") { model.files?.show(folder: session.cwd) }
         Divider()
-        Button("Delete", role: .destructive) { model.delete(session) }
+        if model.selecting, picked, model.pickedSessions.count > 1 {
+            Button(SessionDeleteWords.delete(model.pickedSessions.count), role: .destructive) { model.deletePicked() }
+        } else {
+            if !model.selecting { Button("Select") { model.startSelecting(session) } }
+            Button("Delete", role: .destructive) { model.delete(session) }
+        }
     }
 }
 

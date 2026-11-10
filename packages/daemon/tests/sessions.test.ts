@@ -337,6 +337,37 @@ describe("deleting a session's record", () => {
     expect(await (await del("/sessions/claude-code/c1")).json()).toEqual({ ok: true, files: 1 });
   });
 
+  it("several at once: each by the same rules, one in use left and said so (2026-11-10)", async () => {
+    const { sources } = fixture();
+    const monitor = new SessionMonitor(sources);
+    const audited: unknown[] = [];
+    const terminals = { host: { list: () => [{ agentSessionId: "x1" }] }, audit: { record: (line: unknown) => audited.push(line) }, elsewhere: async () => null };
+    const app = new Hono();
+    mountSessions(app, { sessions: monitor, terminals } as unknown as ApiDeps);
+    const batch = (body: unknown) => app.request("/sessions/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await batch({})).status).toBe(400);
+    expect((await batch({ sessions: [] })).status).toBe(400);
+    expect((await batch({ sessions: [{ harness: "codex" }] })).status).toBe(400);
+    expect((await batch({ sessions: Array.from({ length: 501 }, (_, i) => ({ harness: "codex", id: `n${i}` })) })).status).toBe(400);
+    // Nothing was touched by what was refused.
+    expect(monitor.find("claude-code", "c1")).toBeTruthy();
+    const res = await batch({ sessions: [{ harness: "claude-code", id: "c1" }, { harness: "codex", id: "x1" }, { harness: "claude-code", id: "c1" }, { harness: "codex", id: "nope" }, { harness: "vim", id: "v" }] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      results: [
+        { harness: "claude-code", id: "c1", outcome: "deleted" },
+        { harness: "codex", id: "x1", outcome: "busy", error: "会话正在终端中打开，请先关闭终端。" },
+        { harness: "codex", id: "nope", outcome: "gone", error: "no such session" },
+        { harness: "vim", id: "v", outcome: "gone", error: "unknown harness" },
+      ],
+      deleted: 1, busy: 1, gone: 2, failed: 0,
+    });
+    expect(monitor.find("claude-code", "c1")).toBeNull();
+    expect(monitor.find("codex", "x1")).toBeTruthy();
+    // One audit line for the one that went.
+    expect(audited).toHaveLength(1);
+  });
+
   it("a session just written but held by nothing can go; an ended terminal holds nothing (2026-10-01)", async () => {
     const { sources } = fixture();
     // At NOW the Claude session was written 20 s ago: "active".

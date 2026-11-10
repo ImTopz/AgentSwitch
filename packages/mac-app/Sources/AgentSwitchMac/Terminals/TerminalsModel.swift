@@ -95,6 +95,13 @@ final class TerminalsModel {
     var renameText = ""
     /// The session being continued (its row is dimmed until it is open).
     var opening: String?
+    /// Sessions are being picked to delete together (docs/terminal-v0.md §5 批量删除): a click on a session's row takes
+    /// it in or out instead of going on with it. `picked`: their rows' ids; `pickAnchor`: the one clicked last.
+    var selecting = false
+    var picked: Set<String> = []
+    @ObservationIgnored var pickAnchor: String?
+    /// The modifier keys held at the last mouse-down in the page's window (`NativeTerminalsPage`).
+    @ObservationIgnored var clickFlags: NSEvent.ModifierFlags = []
     var searchFocus = 0
     var renameFocus = 0
 

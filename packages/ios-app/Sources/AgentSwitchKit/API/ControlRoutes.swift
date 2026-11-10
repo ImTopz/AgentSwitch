@@ -56,6 +56,24 @@ extension AgentSwitchAPI {
         let _: OKReply = try await perform("DELETE", ["sessions", harness, id], query: [], body: nil)
     }
 
+    /// Deletes several sessions' records at once, each by the same rules; one in use is left and said so. A Mac whose
+    /// service has no such route yet (404) is asked for each in turn.
+    public func deleteSessions(_ sessions: [SessionSummary]) async throws -> SessionsRemoval {
+        struct One: Encodable { let harness: String; let id: String }
+        struct Body: Encodable { let sessions: [One] }
+        do {
+            return try await post(["sessions", "delete"], body: Body(sessions: sessions.map { One(harness: $0.harness, id: $0.sessionId) }))
+        } catch APIError.http(status: 404, message: _) {
+            var results: [SessionsRemoval.One] = []
+            for session in sessions {
+                var failure: Error?
+                do { try await deleteSession(harness: session.harness, id: session.sessionId) } catch { failure = error }
+                results.append(.init(harness: session.harness, id: session.sessionId, outcome: SessionsRemoval.outcome(of: failure), error: failure?.localizedDescription))
+            }
+            return SessionsRemoval(results: results)
+        }
+    }
+
     /// Records the task as read now; returns the time the Mac recorded, when it says.
     @discardableResult
     public func acknowledge(taskId: String) async throws -> Int64? {

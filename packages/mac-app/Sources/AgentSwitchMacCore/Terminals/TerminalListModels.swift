@@ -375,6 +375,25 @@ extension DaemonClient {
         _ = try await call("DELETE", "/sessions/\(Self.segment(harness))/\(Self.segment(id))")
     }
 
+    /// `POST /sessions/delete`: several at once, each by the same rules; one in use is left and said so. A node whose
+    /// service has no such route yet is asked for each in turn.
+    public func deleteSessions(_ sessions: [SessionSummary]) async throws -> SessionsRemoval {
+        struct Body: Encodable { struct One: Encodable { let harness: String; let id: String }; let sessions: [One] }
+        let body = Body(sessions: sessions.map { .init(harness: $0.harness, id: $0.sessionId) })
+        do {
+            return try decode(SessionsRemoval.self, try await call("POST", "/sessions/delete", body: try JSONEncoder().encode(body), timeout: 300))
+        } catch DaemonError.notSupported {
+            var results: [SessionsRemoval.One] = []
+            for session in sessions {
+                var failure: Error?
+                do { try await deleteSession(harness: session.harness, id: session.sessionId) } catch { failure = error }
+                results.append(.init(harness: session.harness, id: session.sessionId, outcome: SessionsRemoval.outcome(of: failure).rawValue,
+                                     error: (failure as? DaemonError)?.reason))
+            }
+            return SessionsRemoval(results: results)
+        }
+    }
+
     /// `POST /terminals`.
     public func createTerminal(_ body: NewTerminalRequest) async throws -> TerminalInfo {
         struct Reply: Decodable { let terminal: TerminalInfo }

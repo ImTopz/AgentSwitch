@@ -27,6 +27,13 @@ struct TerminalsTab: View {
     /// Folders showing all their sessions (this visit).
     @State private var showingAll: Set<String> = []
     @State private var deletingSession: SessionSummary?
+    /// Sessions are being picked to delete together (docs/terminal-v0.md §5 批量删除): a tap on a session's row takes it
+    /// in or out. `picked`: their rows' ids; `deletingMany`: the ones the question is about.
+    @State private var selecting = false
+    @State private var picked: Set<String> = []
+    @State private var deletingMany: SessionBatch?
+    /// After several were deleted: what the Mac left, and why.
+    @State private var leftSaid: String?
     /// The session whose menu is open (a long press), and where its row is.
     @State private var menuFor: SessionMenu?
     /// The folder just unfolded: its rows are drawn line by line.
@@ -90,12 +97,29 @@ struct TerminalsTab: View {
             .toolbar {
                 // Which Mac's terminals these are, to switch by when more than one is paired (docs/mesh-v0.md §5.1).
                 ToolbarItem(placement: .principal) { MacTabTitle(title: "Terminals") }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { creating = true } label: {
-                        if look.isClassic { Image(systemName: "plus") } else { Text("New").mono(15, weight: .medium) }
+                // `Select` where there are sessions to pick from; while picking, `Done` leaves it.
+                if selecting || folders.contains(where: { !$0.allSessions.isEmpty }) {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { if selecting { endSelecting() } else { selecting = true } } label: {
+                            Text(selecting ? "Done" : "Select").font(look.isClassic ? .body : .system(size: 15, weight: .medium, design: .monospaced))
+                        }
                     }
-                    .accessibilityLabel("New")
-                    .disabled(store.list == nil)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if selecting {
+                        let chosen = pickedSessions(folders)
+                        Button { deletingMany = SessionBatch(sessions: chosen) } label: {
+                            Text(chosen.isEmpty ? "Delete" : "Delete \(chosen.count)").font(look.isClassic ? .body : .system(size: 15, weight: .medium, design: .monospaced))
+                        }
+                        .tint(Theme.failed)
+                        .disabled(chosen.isEmpty)
+                    } else {
+                        Button { creating = true } label: {
+                            if look.isClassic { Image(systemName: "plus") } else { Text("New").mono(15, weight: .medium) }
+                        }
+                        .accessibilityLabel("New")
+                        .disabled(store.list == nil)
+                    }
                 }
             }
             .navigationDestination(for: TerminalRoute.self) { route in
@@ -126,6 +150,11 @@ struct TerminalsTab: View {
                         if let one = folders.flatMap(\.allSessions).first(where: { $0.harness == "claude-code" }) { menuFor = SessionMenu(session: one, anchor: CGRect(x: 16, y: 210, width: 360, height: 36)) }
                     case "terminalsearch": query = "终端"
                     case "terminaldelete": deletingSession = first
+                    // Sessions being picked, two of them in.
+                    case "terminalselect":
+                        selecting = true
+                        picked = Set(folders.flatMap(\.allSessions).prefix(3).dropFirst().map(\.recordID))
+                    case "terminaldeletemany": deletingMany = SessionBatch(sessions: Array(folders.flatMap(\.allSessions).prefix(5)))
                     default: break
                     }
                 }
@@ -167,7 +196,10 @@ struct TerminalsTab: View {
                 }
                 // Its folder on the Files tab, as on the Mac's list (docs/files-v0.md §12.4).
                 if !m.session.cwd.isEmpty { items.append(.init(label: "Show in Files") { model.showInFiles(m.session.cwd) }) }
-                if TerminalsTab.deletable.contains(m.session.harness) { items.append(.init(label: "Delete", role: .destructive) { deletingSession = m.session }) }
+                if TerminalsTab.deletable.contains(m.session.harness) {
+                    items.append(.init(label: "Select") { selecting = true; picked = [m.session.recordID] })
+                    items.append(.init(label: "Delete", role: .destructive) { deletingSession = m.session })
+                }
                 return PixelBox(cancel: nil, actions: items, anchor: m.anchor)
             }
             .pixelBox(item: $bypassResume) { s in
@@ -179,11 +211,18 @@ struct TerminalsTab: View {
                 PixelBox(head: "Delete Record", tone: .red, message: "删除会话记录「\(s.displayTitle)」？Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。",
                          actions: [.init(label: "Delete", role: .primary) { Task { await deleteSession(s) } }])
             }
+            .pixelBox(item: $deletingMany) { batch in
+                PixelBox(head: "Delete Records", tone: .red, message: SessionDeleteWords.question(titles: batch.sessions.map(\.displayTitle)),
+                         actions: [.init(label: "Delete", role: .primary) { Task { await deleteSessions(batch.sessions) } }])
+            }
             .pixelBox(item: $elsewhere) { e in
                 PixelBox(head: "In Use", tone: .amber,
                          message: "「\(e.session.displayTitle)」正在 \(e.app) 中运行。同一会话同时只能由一个程序写入。请先在 \(e.app) 中退出，或创建分支：新会话包含全部历史，原会话保持不变。",
                          actions: [.init(label: "Fork", role: .primary) { Task { await resume(e.session, fork: true, mode: e.mode, in: e.folder) } }])
             }
+        }
+        .pixelBox(item: $leftSaid) { message in
+            PixelBox(head: "Not Deleted", tone: .amber, message: message, cancel: nil, actions: [.init(label: "OK", role: .primary) {}])
         }
         .pixelBox(item: $failure) { message in
             PixelBox(head: "Error", tone: .red, message: message, cancel: nil, actions: [.init(label: "OK", role: .primary) {}])
@@ -278,6 +317,12 @@ struct TerminalsTab: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // Its own sessions, all at once (those a folder under it has are that folder's).
+            .contextMenu {
+                let own = f.sessions.filter { !gone.contains($0.id) && TerminalsTab.deletable.contains($0.harness) }
+                if !f.cwd.isEmpty { Button("Show in Files", systemImage: "folder") { model.showInFiles(f.cwd) } }
+                if own.count > 1 { Button(SessionDeleteWords.all(own.count), systemImage: "trash", role: .destructive) { deletingMany = SessionBatch(sessions: own) } }
+            }
             .accessibilityHint(isFolded ? "展开" : "收起")
             .modifier(stepIn(at, within: above))
             if !isFolded {
@@ -304,7 +349,8 @@ struct TerminalsTab: View {
                                open: { path.append(TerminalRoute.session(s)) },
                                resume: { Task { await resume(s) } },
                                menu: { anchor in menuFor = SessionMenu(session: s, anchor: anchor) },
-                               delete: { deletingSession = s })
+                               delete: { deletingSession = s },
+                               picking: selecting ? picked.contains(s.recordID) : nil, pick: { picked.formSymmetricDifference([s.recordID]) })
                         .modifier(WipeOut(on: wiping.contains(s.id)))
                         // Those "more" brings are drawn from the first of them.
                         .modifier(stepIn(at + 1 + (all && i >= Self.sessionsShown ? index - Self.sessionsShown : index), within: within))
@@ -491,6 +537,38 @@ struct TerminalsTab: View {
         }
     }
 
+    /// The sessions picked that the list still has, in the list's order.
+    private func pickedSessions(_ folders: [TerminalTree.Folder]) -> [SessionSummary] {
+        folders.flatMap(\.allSessions).filter { picked.contains($0.recordID) && !gone.contains($0.id) && TerminalsTab.deletable.contains($0.harness) }
+    }
+
+    private func endSelecting() {
+        selecting = false
+        picked = []
+    }
+
+    /// Several at once: their rows are wiped out while the Mac deletes the records; one it left (in use) comes back, and
+    /// the tab says how many.
+    private func deleteSessions(_ list: [SessionSummary]) async {
+        guard let api = model.api, !list.isEmpty else { return }
+        let ids = Set(list.map(\.id))
+        endSelecting()
+        wiping.formUnion(ids)
+        async let removed = api.deleteSessions(list)
+        try? await Task.sleep(for: .milliseconds(210))
+        gone.formUnion(ids)
+        wiping.subtract(ids)
+        do {
+            let removal = try await removed
+            gone.subtract(removal.kept)
+            await model.refreshTerminals(sessions: true)
+            leftSaid = SessionDeleteWords.left(removal)
+        } catch {
+            gone.subtract(ids)
+            failure = error.localizedDescription
+        }
+    }
+
     /// The agents whose sessions can be gone on with (pi's since 2026-10-11, docs/terminal-v0.md §5).
     static let resumable: Set<String> = ["claude-code", "codex", "opencode", "pi"]
 
@@ -544,6 +622,12 @@ struct TerminalsTab: View {
     }
 }
 
+/// The sessions one question is about.
+private struct SessionBatch: Identifiable, Equatable {
+    let id = UUID()
+    let sessions: [SessionSummary]
+}
+
 private struct SessionMenu: Equatable {
     let session: SessionSummary
     let anchor: CGRect
@@ -573,6 +657,9 @@ private struct SessionRow: View {
     let resume: () -> Void
     let menu: (CGRect) -> Void
     let delete: () -> Void
+    /// While sessions are being picked: whether this one is in (nil: not picking). A tap takes it in or out.
+    var picking: Bool? = nil
+    var pick: () -> Void = {}
     @State private var held = false
     @State private var frame = FrameRef()
     @Environment(\.interfaceLook) private var look
@@ -583,7 +670,14 @@ private struct SessionRow: View {
         HStack(spacing: 8) {
             TreeLine(last: last, depth: depth)
             // The classic look: a clock where a terminal has its dot (an earlier session, to go on with).
-            if look.isClassic { Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(Theme.inkDim).frame(width: 16) }
+            if let picking, deletable {
+                // The row's box while sessions are picked from.
+                if look.isClassic {
+                    Image(systemName: picking ? "checkmark.circle.fill" : "circle").font(.system(size: 15)).foregroundStyle(picking ? Theme.signal : Theme.inkDim).frame(width: 16)
+                } else {
+                    Text(picking ? "■" : "□").mono(13).foregroundStyle(picking ? Theme.signal : Theme.inkDim)
+                }
+            } else if look.isClassic { Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(Theme.inkDim).frame(width: 16) }
             HStack(spacing: 8) {
                 (title ?? Text(session.displayTitle)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)
@@ -593,16 +687,17 @@ private struct SessionRow: View {
                 Text(session.updated.relative).mono(11).foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
-            .onTapGesture(perform: open)
+            .onTapGesture { if picking == nil { open() } else if deletable { pick() } }
             .onLongPressGesture(minimumDuration: 0.45) {
-                guard resumable || deletable else { return }
+                guard picking == nil, resumable || deletable else { return }
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 menu(frame.rect)
             } onPressingChanged: { held = $0 }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isButton)
             .accessibilityAction(named: "delete") { if deletable { delete() } }
-            if resumable {
+            .accessibilityAddTraits(picking == true ? .isSelected : [])
+            if resumable, picking == nil {
                 Button(action: resume) {
                     if opening == session.id { BrailleSpinner(color: .secondary) } else { Text("Resume").mono(12) }
                 }
@@ -612,7 +707,7 @@ private struct SessionRow: View {
             }
         }
         .padding(.vertical, 8)
-        .background(held ? Theme.raised : Color.clear)
+        .background(held || picking == true ? Theme.raised : Color.clear)
         .contentShape(Rectangle())
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame.rect = $0 }
     }

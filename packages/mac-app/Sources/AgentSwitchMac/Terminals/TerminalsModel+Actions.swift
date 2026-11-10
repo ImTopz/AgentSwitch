@@ -385,6 +385,63 @@ extension TerminalsModel {
         }
     }
 
+    // MARK: several sessions
+
+    /// The sessions picked that the list still has.
+    var pickedSessions: [SessionSummary] { sessions.filter { picked.contains($0.recordID) } }
+
+    /// A folder's own sessions as the list has them now (what a filter hides is not among them).
+    func ownSessions(in cwd: String) -> [SessionSummary] {
+        TerminalTree.flatten(TerminalTree.filtered(tree, by: filter)).first { $0.folder.cwd == cwd }?.folder.sessions ?? []
+    }
+
+    /// `Select`: the list's session rows are picked from, this one first.
+    func startSelecting(_ session: SessionSummary) {
+        selecting = true
+        picked = [session.recordID]
+        pickAnchor = session.recordID
+    }
+
+    func endSelecting() {
+        selecting = false
+        picked = []
+        pickAnchor = nil
+    }
+
+    /// A session's row clicked while picking: in or out; with ⇧, every session row from the one clicked before to it.
+    func pick(_ session: SessionSummary, range: Bool = false) {
+        let order = rows.compactMap { row -> String? in if case .session(let s, _, _) = row { s.recordID } else { nil } }
+        picked = SessionPick.clicked(session.recordID, picked: picked, anchor: pickAnchor, order: order, range: range)
+        pickAnchor = session.recordID
+    }
+
+    func deletePicked() { delete(pickedSessions) }
+    func deleteAll(in cwd: String) { delete(ownSessions(in: cwd)) }
+
+    /// Deletes the agents' own records of these sessions after one question; one in use is left, and said so.
+    func delete(_ list: [SessionSummary]) {
+        guard let first = list.first else { return }
+        let c = client()
+        Task {
+            // One alone is asked about as one is from its own row.
+            let one = TerminalSheet(title: "删除会话「\(first.title.isEmpty ? "无标题" : TerminalListText.brief(first.title, columns: 60))」？",
+                                    body: "将删除 \(TerminalListText.agentName(first.harness)) 保存的会话记录，此操作无法撤销。", confirm: "Delete", destructive: true)
+            let several = TerminalSheet(title: SessionDeleteWords.title(list.count), body: SessionDeleteWords.body(titles: list.map(\.title)), confirm: "Delete", destructive: true)
+            let answer = await ask(list.count == 1 ? one : several)
+            guard answer.ok else { return }
+            do {
+                let removal = try await c.deleteSessions(list)
+                endSelecting()
+                await refreshSessions()
+                // One that went says nothing, as from its own row; one that stayed says why.
+                if list.count == 1 { if let error = removal.results.first(where: { $0.outcome != "deleted" })?.error { say(error) } }
+                else if let said = SessionDeleteWords.said(removal) { say(said) }
+            } catch {
+                say(Self.reason(error))
+            }
+        }
+    }
+
     // MARK: keys
 
     /// A key of the page's, done; false when it is not for now (nothing to deny, no terminal to close).

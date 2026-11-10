@@ -319,6 +319,86 @@ enum TerminalProbe {
         say("the context-menu action: menus opened \(opened.menus) | screen: \(rows(1))")
     }
 
+    /// `-probeBeside YES`: an earlier session's row clicked with ⌘ held — it goes on in a new pane to the right, what
+    /// the page showed staying where it was (2026-11-10, user: 按住cmd加一个没有resume的session 不会触发分屏).
+    /// `-probeBesideSimple YES`: from the simple view. `-probeBesideAt x,y`: the click itself, at that point of the
+    /// window's picture (from its top left), instead of the row's action.
+    private static func beside(_ main: MainWindowController, window: NSWindow, into dir: URL, say: (String) -> Void) async {
+        guard let model = main.probeTerminals else { return say("beside: not the native page") }
+        func pause(_ ms: Int) async { try? await Task.sleep(for: .milliseconds(ms)) }
+        func picture(_ name: String) {
+            window.displayIfNeeded()
+            guard let frame = window.contentView?.superview, let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else { return }
+            frame.cacheDisplay(in: frame.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        func panes() -> String {
+            model.paneList.map { "\($0.id)\($0.id == model.focusPane ? "*" : ""):\($0.term ?? "-")(shows \(model.panes[$0.id]?.screen.probeShown ?? "-"))" }.joined(separator: " ")
+        }
+        window.makeKey()
+        for _ in 0..<20 where model.sessions.isEmpty { await pause(250) }
+        await pause(800)
+        if UserDefaults.standard.bool(forKey: "probeBesideSimple") { main.probeToggleView(); await pause(1500) }
+        say("beside: before: sessions \(model.sessions.count) terminals \(model.terminals.count) panes \(panes()) simple \(model.focusedSimple)")
+        picture("beside-1")
+        func click(_ x: Double, _ y: Double, _ flags: NSEvent.ModifierFlags) async {
+            guard let frame = window.contentView?.superview else { return }
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard let e = NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: frame.bounds.height - y), modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0) else { continue }
+                NSApp.postEvent(e, atStart: false)
+                await pause(80)
+            }
+            await pause(400)
+        }
+        // `-probePick x,y1,y2`: sessions picked to delete together — `Select` on the first listed, a click on the row at
+        // y1 (in, out), the row at y2, y1 again, the foot's `Delete`, the question answered.
+        if let at = UserDefaults.standard.string(forKey: "probePick")?.split(separator: ",").compactMap({ Double($0) }), at.count == 3,
+           let first = model.rows.compactMap({ row -> SessionSummary? in if case .session(let s, _, _) = row { s } else { nil } }).first {
+            func titles() -> String { model.pickedSessions.map(\.title).sorted().joined(separator: ", ") }
+            model.startSelecting(first)
+            await pause(600)
+            say("pick: Select on '\(first.title)': selecting \(model.selecting) picked [\(titles())]")
+            // ⌘ held (it means nothing while picking): a plain click made here does not reach a row that can be dragged (the drag waits for the mouse itself).
+            await click(at[0], at[1], .command)
+            say("pick: a click: picked [\(titles())] panes \(panes())")
+            await click(at[0], at[1], .command)
+            say("pick: the same row again: picked [\(titles())]")
+            await click(at[0], at[2], .command)
+            await click(at[0], at[1], .command)
+            say("pick: the row at y2, then y1 once more: picked [\(titles())]")
+            picture("pick-1")
+            model.deletePicked()
+            await pause(600)
+            say("pick: Delete: asks '\(model.sheet?.title ?? "-")' / '\(model.sheet?.body ?? "-")'")
+            picture("pick-2")
+            model.answerSheet(ok: true)
+            await pause(2500)
+            say("pick: answered: sessions \(model.sessions.map(\.title)) selecting \(model.selecting) notice '\(model.notice ?? "")'")
+            picture("pick-3")
+            return
+        }
+        if let at = UserDefaults.standard.string(forKey: "probeBesideAt")?.split(separator: ",").compactMap({ Double($0) }), at.count == 2,
+           let frame = window.contentView?.superview {
+            let point = NSPoint(x: at[0], y: frame.bounds.height - at[1])
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard let e = NSEvent.mouseEvent(with: type, location: point, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0) else { continue }
+                NSApp.postEvent(e, atStart: false)
+                await pause(80)
+            }
+            say("beside: ⌘ click at \(Int(at[0])),\(Int(at[1]))")
+        } else if let session = model.sessions.first {
+            model.open(.session(session), beside: true)
+            say("beside: the row's action for \(session.sessionId)")
+        }
+        for at in [300, 1500, 4000] {
+            await pause(at)
+            say("beside: later: terminals \(model.terminals.count) panes \(panes()) opening \(model.opening ?? "-") notice '\(model.notice ?? "")'")
+        }
+        picture("beside-2")
+    }
+
     static func run(_ terminals: MainWindowController, into dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var log: [String] = []
@@ -336,6 +416,10 @@ enum TerminalProbe {
             guard let screen, let window = terminals.window else { say("no window or screen"); exit(1) }
             if UserDefaults.standard.bool(forKey: "probeSimple") {
                 await simple(terminals, id: id, window: window, into: dir, say: say)
+                exit(0)
+            }
+            if UserDefaults.standard.bool(forKey: "probeBeside") {
+                await beside(terminals, window: window, into: dir, say: say)
                 exit(0)
             }
             if UserDefaults.standard.bool(forKey: "probeKeys") {

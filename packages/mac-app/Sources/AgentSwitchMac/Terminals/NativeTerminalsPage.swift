@@ -26,6 +26,7 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
     var onScreen = false { didSet { if onScreen != oldValue { seenChanged() } } }
     private var visible = true
     private var keyMonitor: Any?
+    private var clickMonitor: Any?
     private var stopped = false
 
     /// `node`: the node whose terminals these are (docs/mesh-v0.md §5.2); nil: this Mac's. Each node's page remembers
@@ -153,6 +154,8 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
         stopped = true
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
         model.stop()
     }
 
@@ -209,6 +212,17 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
             nonisolated(unsafe) let key = event
             let taken = MainActor.assumeIsolated { self?.handle(key) ?? false }
             return taken ? nil : event
+        }
+        // What was held as the mouse went down: a row's click is read from the click itself. The keyboard as it is
+        // when the row's action runs is not it — a moment later ⌘ may be up again, and the session went on in the pane
+        // in focus instead of beside it (2026-11-10, user: 按住cmd加一个没有resume的session 不会触发分屏).
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            nonisolated(unsafe) let click = event
+            MainActor.assumeIsolated {
+                guard let self, click.window === self.window else { return }
+                self.model.clickFlags = click.modifierFlags.intersection([.command, .shift, .option, .control])
+            }
+            return event
         }
     }
 
