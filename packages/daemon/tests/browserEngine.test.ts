@@ -260,7 +260,7 @@ describe("what can be installed (docs/browser-v0.md §7.2 第 6 条)", () => {
 
 // ---- the service and its routes ----
 import { Hono } from "hono";
-import { EngineKit } from "../src/browser/engine/kit.js";
+import { AUTO_CHECK_EVERY_MS, AUTO_CHECK_RETRY_MS, EngineKit } from "../src/browser/engine/kit.js";
 import { mountBrowserEngine } from "../src/api/browserEngine.js";
 import { bundledPlaywright, firefoxVersion } from "../src/browser/engine/loader.js";
 import type { ApiDeps } from "../src/api/shared.js";
@@ -268,20 +268,21 @@ import type { ApiDeps } from "../src/api/shared.js";
 const FIREFOX = firefoxVersion(bundledPlaywright())!;
 const MAJOR = FIREFOX.split(".")[0];
 
-function kit(over: { selfCheck?: UpdateDeps["selfCheck"]; registry?: unknown } = {}) {
+function kit(over: { selfCheck?: UpdateDeps["selfCheck"]; registry?: unknown; auto?: boolean; offline?: () => boolean; now?: () => number } = {}) {
   const body = (v: string) => `camoufox ${v}`;
   const release = (v: string, prerelease = false, day = 1) => ({ tag_name: `v${v}`, prerelease, published_at: `2026-10-0${day}T00:00:00Z`, assets: [
     { name: `camoufox-${v}-mac.arm64.zip`, size: body(v).length, digest: sha256(body(v)), browser_download_url: `https://github.test/${v}.zip` }] });
   const releases = [release(`${MAJOR}.0.1-beta.40`, true, 5), release(`${MAJOR}.0.1-beta.39`, false, 3), release("100.0-beta.1", false, 1), release("100.0-beta.45", false, 2)];
   const asked: string[] = [];
   const k = new EngineKit({
-    root: root(), platform: "darwin", arch: "arm64", now: () => 5000,
-    fetchJson: async (url) => { asked.push(url); return url.includes("github") ? releases : (over.registry ?? { versions: {} }); },
+    root: root(), platform: "darwin", arch: "arm64", now: over.now ?? (() => 5000),
+    ...(over.auto ? { auto: true } : {}), sleep: () => new Promise((r) => setImmediate(r)),
+    fetchJson: async (url) => { asked.push(url); if (over.offline?.()) throw new Error("offline"); return url.includes("github") ? releases : (over.registry ?? { versions: {} }); },
     download: async (source, file, progress) => { progress(1, 1); writeFileSync(file, source.part === "camoufox" ? body(source.version) : `playwright ${source.version}`); },
     unpack: async (_part, archive, into) => { writeFileSync(join(into, "marker.txt"), readFileSync(archive, "utf8")); },
     selfCheck: over.selfCheck ?? (async () => ({ ok: true })),
   });
-  return { kit: k, asked };
+  return { kit: k, asked, releases, release };
 }
 
 describe("the engine as the service has it (GET /browser/engine, POST /browser/engine/update)", () => {
@@ -392,6 +393,85 @@ describe("the engine as the service has it (GET /browser/engine, POST /browser/e
 import { execFileSync } from "node:child_process";
 import { camoufoxExecutable, downloadArchive, unpackArchive } from "../src/browser/engine/files.js";
 import { playwrightIn } from "../src/browser/engine/loader.js";
+
+describe("the engine looks after itself as browsers start (docs/browser-v0.md §7.2 第 6 条, 2026-11-11)", () => {
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  it("does nothing unless the service asked for it", async () => {
+    const { kit: k, asked } = kit();
+    await k.ensure();
+    expect(asked).toEqual([]);
+    expect(k.executable()).toBeNull();
+  });
+
+  it("with no Camoufox, a start waits while the newest that fits is installed — without stopping the browser that waits", async () => {
+    const { kit: k } = kit({ auto: true });
+    let stopped = 0;
+    k.aroundSwitch(async (apply) => { stopped += 1; apply(); });
+    await Promise.all([k.ensure(), k.ensure()]);
+    expect(k.status().camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.39`);
+    expect(k.status().update).toMatchObject({ running: false, ok: true });
+    expect(stopped).toBe(0);
+  });
+
+  it("one that cannot be fetched: the start goes on, the reason is told, and it is not tried again at every start", async () => {
+    let offline = true, at = 5000;
+    const { kit: k, asked } = kit({ auto: true, offline: () => offline, now: () => at });
+    await k.ensure();
+    expect(k.status().camoufox.installed).toBeNull();
+    expect(k.status().available?.problem).toContain("offline");
+    await k.ensure();
+    expect(asked).toHaveLength(1);
+    offline = false;
+    at += AUTO_CHECK_RETRY_MS;
+    await k.ensure();
+    expect(k.status().camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.39`);
+  });
+
+  it("with one installed, a start does not wait: a newer build is fetched beside it and switched to once no tab is open", async () => {
+    let at = 5000;
+    const { kit: k, asked, releases, release } = kit({ auto: true, now: () => at });
+    await k.ensure();
+    let open = 1, stopped = 0;
+    k.aroundSwitch(async (apply) => { stopped += 1; apply(); });
+    k.idleWhen(() => open === 0);
+    // Nothing newer: asked once, and not again at the next start.
+    const before = asked.length;
+    await k.ensure();
+    await settle();
+    await k.ensure();
+    await settle();
+    expect(asked.length).toBe(before + 1);
+    expect(k.status().update.running).toBe(false);
+    // A newer build is out by the time it asks again.
+    releases.unshift(release(`${MAJOR}.0.1-beta.41`, false, 7));
+    at += AUTO_CHECK_EVERY_MS;
+    await k.ensure();
+    await settle();
+    expect(k.status().update).toMatchObject({ running: true, phase: "switch" });
+    expect(k.status().camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.39`);
+    expect(stopped).toBe(0);
+    open = 0;
+    expect(await k.settled()).toMatchObject({ ok: true });
+    expect(stopped).toBe(1);
+    expect(k.status().camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.41`);
+  });
+
+  it("a build waiting for the tabs to close can be cancelled: the one in use stays", async () => {
+    let at = 5000;
+    const { kit: k, releases, release } = kit({ auto: true, now: () => at });
+    await k.ensure();
+    k.aroundSwitch(async (apply) => { apply(); });
+    k.idleWhen(() => false);
+    releases.unshift(release(`${MAJOR}.0.1-beta.41`, false, 7));
+    at += AUTO_CHECK_EVERY_MS;
+    await k.ensure();
+    await settle();
+    k.cancel();
+    expect(await k.settled()).toMatchObject({ ok: false, cancelled: true });
+    expect(k.status().camoufox.installed?.version).toBe(`${MAJOR}.0.1-beta.39`);
+  });
+});
 
 describe("an engine archive", () => {
   it("is streamed to a file with how far it is; a refusal is told", async () => {

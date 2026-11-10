@@ -147,6 +147,8 @@ export function engineDriver(opts: { readonly kit?: EngineKit; readonly chrome: 
   return {
     engine: () => executable() ? "camoufox" : "chrome",
     async launch(launch) {
+      // The engine is fetched first when there is none, and looked after from here on (kit.ts `ensure`).
+      await opts.kit?.ensure();
       const program = executable();
       if (!program || !opts.kit) return opts.chrome.launch(launch);
       const proxy = await opts.forwarder.start();

@@ -202,7 +202,11 @@ describe("which browser the host starts (docs/browser-v0.md §7.2 第 2 条)", (
     const none = engineDriver({ chrome, forwarder, headless: true });
     expect(none.engine()).toBe("chrome");
     expect(await none.launch(launch)).toEqual({ marker: "chrome" });
-    const notYet = engineDriver({ kit: { executable: () => null, playwright: bundledPlaywright } as unknown as EngineKit, chrome, forwarder, headless: true });
+    // The engine is asked first at every start: that is where one is fetched when there is none (kit.ts `ensure`).
+    let asked = 0;
+    await engineDriver({ kit: { executable: () => null, playwright: bundledPlaywright, ensure: async () => { asked += 1; } } as unknown as EngineKit, chrome: { launch: async () => ({}) as never }, forwarder: new Forwarder({ ownPorts: () => [] }), headless: true }).launch({ profileDir: "/tmp/x" } as never);
+    expect(asked).toBe(1);
+    const notYet = engineDriver({ kit: { executable: () => null, playwright: bundledPlaywright, ensure: async () => undefined } as unknown as EngineKit, chrome, forwarder, headless: true });
     expect(notYet.engine()).toBe("chrome");
     await notYet.launch(launch);
     expect(started).toEqual([launch, launch]);
@@ -211,7 +215,7 @@ describe("which browser the host starts (docs/browser-v0.md §7.2 第 2 条)", (
 
   it("Camoufox once it is installed (asked at every start), on a profile of its own", () => {
     let program: string | null = null;
-    const d = engineDriver({ kit: { executable: () => program, playwright: bundledPlaywright } as unknown as EngineKit, chrome: { launch: async () => ({}) as never }, forwarder: new Forwarder({ ownPorts: () => [] }), headless: true });
+    const d = engineDriver({ kit: { executable: () => program, playwright: bundledPlaywright, ensure: async () => undefined } as unknown as EngineKit, chrome: { launch: async () => ({}) as never }, forwarder: new Forwarder({ ownPorts: () => [] }), headless: true });
     expect(d.engine()).toBe("chrome");
     program = "/engine/camoufox";
     expect(d.engine()).toBe("camoufox");
@@ -225,7 +229,7 @@ describe("which browser the host starts (docs/browser-v0.md §7.2 第 2 条)", (
       .toBe(`Camoufox 未能启动：browserType.launchPersistentContext: Protocol error (Browser.setDefaultViewport): ERROR: method not found。${where}`);
     // The program named is not there: the host is told in those words (a plain ENOENT would read as a missing Chrome).
     const forwarder = new Forwarder({ ownPorts: () => [] });
-    const d = engineDriver({ kit: { executable: () => "/nowhere/camoufox", playwright: bundledPlaywright } as unknown as EngineKit, chrome: { launch: async () => ({}) as never }, forwarder, headless: true });
+    const d = engineDriver({ kit: { executable: () => "/nowhere/camoufox", playwright: bundledPlaywright, ensure: async () => undefined } as unknown as EngineKit, chrome: { launch: async () => ({}) as never }, forwarder, headless: true });
     try {
       const err = await d.launch(launch).then(() => null, (e: unknown) => e);
       expect(launchFailure(err)).toBe(`未找到 Camoufox 的程序。${where}`);

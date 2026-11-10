@@ -433,7 +433,12 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const sessionKeys: SessionKeys = new SessionKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
     browser: (agent, id) => profileBrowsers?.get(`${agent}.${id}`)?.host ?? null });
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
-  if (browser && engineKit) engineKit.aroundSwitch((apply) => browser.host.restart(apply));
+  // The profiles' own browsers run on the same copy: stopped with it, back with their tabs after.
+  if (browser && engineKit) {
+    const hosts = () => [browser.host, ...(profileBrowsers?.keys() ?? []).flatMap((key) => { const b = profileBrowsers?.get(key); return b ? [b.host] : []; })];
+    engineKit.aroundSwitch((apply) => hosts().reduceRight<() => Promise<void>>((inner, host) => () => host.restart(inner), async () => { apply(); })());
+    engineKit.idleWhen(() => hosts().every((host) => host.list().length === 0));
+  }
   // The terminals' agents use it through the agent bridge (docs/terminal-v0.md §3; with no gate in front since
   // 2026-10-08, docs/profiles-v0.md §8): a session of their own per terminal, ended with the program; the terminal's
   // tabs close when the terminal is deleted.

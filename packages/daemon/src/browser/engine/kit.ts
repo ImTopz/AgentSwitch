@@ -49,7 +49,21 @@ export type EngineKitOptions = {
   readonly download?: UpdateDeps["download"];
   readonly unpack?: UpdateDeps["unpack"];
   readonly selfCheck?: UpdateDeps["selfCheck"];
+  /** The engine looks after itself as browsers are started (`ensure`): installed when there is none, updated when a
+   *  newer build is out. Off unless asked for: the running service asks (engine/setup.ts). */
+  readonly auto?: boolean;
+  /** How a wait is slept through (tests). */
+  readonly sleep?: (ms: number) => Promise<void>;
 };
+
+/** A browser's start asks what is new this often at most… */
+export const AUTO_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+/** …and again this soon after a check that could not be made. */
+export const AUTO_CHECK_RETRY_MS = 30 * 60 * 1000;
+/** A build fetched by itself is switched to once no tab is open: looked at this often. */
+export const AUTO_SWITCH_POLL_MS = 5000;
+
+const unrefSleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms).unref(); });
 
 async function fetchJson(url: string): Promise<unknown> {
   const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "AgentSwitch" }, signal: AbortSignal.timeout(20_000) });
@@ -66,8 +80,19 @@ export class EngineKit {
   private readonly fetchJson: (url: string) => Promise<unknown>;
   private available: EngineAvailable | undefined;
   private switching: ((apply: () => void) => Promise<void>) | undefined;
+  private readonly auto: boolean;
+  private readonly sleep: (ms: number) => Promise<void>;
+  private idle: (() => boolean) | undefined;
+  /** Starts of a browser waiting for the first engine to be installed. */
+  private waiting = 0;
+  /** The update under way was begun by `ensure` over an engine in use: it switches once no tab is open. */
+  private quiet = false;
+  private abandoned = false;
+  private autoCheckAfter = 0;
 
   constructor(opts: EngineKitOptions) {
+    this.auto = opts.auto ?? false;
+    this.sleep = opts.sleep ?? unrefSleep;
     this.store = new EngineStore(opts.root);
     this.platform = opts.platform ?? process.platform;
     this.arch = opts.arch ?? process.arch;
@@ -78,7 +103,7 @@ export class EngineKit {
       download: opts.download ?? downloadArchive,
       unpack: opts.unpack ?? ((part, archive, into, signal) => unpackArchive(part, archive, into, signal, this.platform)),
       selfCheck: opts.selfCheck ?? (async () => ({ ok: false, reason: "此服务未配置自检，不能更新引擎。" })),
-      switching: (apply) => this.switching ? this.switching(apply) : Promise.resolve(apply()),
+      switching: (apply) => this.switch(apply),
     });
   }
 
@@ -86,6 +111,71 @@ export class EngineKit {
    *  with its tabs after (the host's `restart`). */
   aroundSwitch(switching: (apply: () => void) => Promise<void>): void {
     this.switching = switching;
+  }
+
+  /** Whether any tab is open in a browser on the engine. A build `ensure` fetched over one in use is not switched to
+   *  under an open page — a sign-in half done, an agent in the middle of a form: it waits for this. */
+  idleWhen(idle: () => boolean): void {
+    this.idle = idle;
+  }
+
+  private async switch(apply: () => void): Promise<void> {
+    // A browser's start is waiting for this very engine: there is no Camoufox to stop, and stopping the browser that
+    // waits would wait for its own start.
+    if (this.waiting > 0 || !this.switching) { apply(); return; }
+    if (this.quiet) {
+      while (this.idle && !this.idle()) {
+        if (this.abandoned) throw new Error("已取消。");
+        await this.sleep(AUTO_SWITCH_POLL_MS);
+      }
+    }
+    await this.switching(apply);
+  }
+
+  /** Before a browser starts (docs/browser-v0.md §7.2 第 6 条, 2026-11-11; user: profile 需要用到浏览器时或者启动浏览器
+   *  时浏览器自动下载更新安装). With no Camoufox installed the newest one that fits is downloaded, checked and
+   *  installed, and the start waits for it — what the start then finds is that Camoufox, or, if it could not be
+   *  installed, no Camoufox as before (the reason is in `status().update`). With one installed the start does not
+   *  wait: now and then it is asked whether a newer build is out (or the installed one is older than the least this
+   *  service works with), and that build is fetched and checked beside the one in use and switched to once no tab is
+   *  open. Never throws. */
+  async ensure(): Promise<void> {
+    if (!this.auto) return;
+    const missing = (): boolean => this.store.installed("camoufox") === null;
+    if (missing()) {
+      // One that could not be fetched is not tried again at every start: a Mac that is offline would wait each time.
+      if (!this.updater.state().running && this.now() < this.autoCheckAfter) return;
+      this.waiting += 1;
+      try {
+        if (!this.updater.state().running) {
+          const began = await this.update({ camoufox: "latest" });
+          if (!began.ok) this.problem(began.error);
+        }
+        const ended = await this.updater.done();
+        if (missing()) {
+          this.autoCheckAfter = this.now() + AUTO_CHECK_RETRY_MS;
+          if (ended.error && !ended.cancelled) this.problem(ended.error);
+        }
+      } catch (err) {
+        this.problem((err as Error).message || String(err));
+      } finally {
+        this.waiting -= 1;
+      }
+      return;
+    }
+    if (this.updater.state().running || this.now() < this.autoCheckAfter) return;
+    this.autoCheckAfter = this.now() + AUTO_CHECK_EVERY_MS;
+    void this.check().then(async (status) => {
+      if (status.available?.problem) { this.autoCheckAfter = this.now() + AUTO_CHECK_RETRY_MS; return; }
+      if (!status.available?.camoufox || this.updater.state().running) return;
+      const began = await this.update({ camoufox: "latest" });
+      if (began.ok) this.quiet = true;
+    }).catch(() => { this.autoCheckAfter = this.now() + AUTO_CHECK_RETRY_MS; });
+  }
+
+  /** Why the engine could not be fetched by itself, where a check's problem is told. */
+  private problem(reason: string): void {
+    this.available = { camoufox: this.available?.camoufox ?? null, checkedAt: this.now(), problem: reason };
   }
 
   /** As the service starts: what an interrupted update left is cleared. */
@@ -124,6 +214,7 @@ export class EngineKit {
   }
 
   cancel(): void {
+    this.abandoned = true;
     this.updater.cancel();
   }
 
@@ -186,6 +277,8 @@ export class EngineKit {
     } catch (err) {
       return refuse(`无法读取可用的版本：${(err as Error).message}`, 502);
     }
+    this.quiet = false;
+    this.abandoned = false;
     const started = this.updater.start(sources);
     return started.ok ? { ok: true } : refuse("引擎正在更新中。", 409);
   }
