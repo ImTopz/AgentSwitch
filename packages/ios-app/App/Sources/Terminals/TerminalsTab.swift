@@ -88,6 +88,8 @@ struct TerminalsTab: View {
             .navigationTitle("Terminals")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Which Mac's terminals these are, to switch by when more than one is paired (docs/mesh-v0.md §5.1).
+                ToolbarItem(placement: .principal) { MacTabTitle(title: "Terminals") }
                 ToolbarItem(placement: .primaryAction) {
                     Button { creating = true } label: {
                         if look.isClassic { Image(systemName: "plus") } else { Text("New").mono(15, weight: .medium) }

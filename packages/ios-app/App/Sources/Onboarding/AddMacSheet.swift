@@ -26,23 +26,32 @@ struct AddMacSheet: View {
     }
 }
 
+/// The paired Macs as a menu's rows — the current one checked — and `Add Mac` under them.
+struct MacSwitchRows: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ForEach(model.macs.servers, id: \.fingerprint) { mac in
+            Button { model.switchTo(mac.fingerprint) } label: {
+                if mac.fingerprint == model.profile?.fingerprint {
+                    Label(mac.name, systemImage: "checkmark")
+                } else {
+                    Text(mac.name)
+                }
+            }
+        }
+        Divider()
+        Button("Add Mac", systemImage: "plus") { model.sheet = .addMac }
+    }
+}
+
 /// The current Mac as the home screen's title, with the other paired Macs to switch to.
 struct MacSwitcher: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         Menu {
-            ForEach(model.macs.servers, id: \.fingerprint) { mac in
-                Button { model.switchTo(mac.fingerprint) } label: {
-                    if mac.fingerprint == model.profile?.fingerprint {
-                        Label(mac.name, systemImage: "checkmark")
-                    } else {
-                        Text(mac.name)
-                    }
-                }
-            }
-            Divider()
-            Button("Add Mac", systemImage: "plus") { model.sheet = .addMac }
+            MacSwitchRows()
         } label: {
             HStack(spacing: 4) {
                 Text(model.profile?.name ?? "AgentSwitch").font(.headline)
@@ -52,4 +61,61 @@ struct MacSwitcher: View {
         }
         .accessibilityLabel("切换 Mac，当前为 \(model.profile?.name ?? "Mac")")
     }
+}
+
+/// Which Mac a page shows, as the small line under its title (`@ Mac mini`; `On Mac mini` in the classic look, as the
+/// Files pages write it). With more than one Mac paired the line is the menu to switch to another — the one Dispatch's
+/// title has, on every page (docs/mesh-v0.md §5.1; 2026-11-10, user: 手机上现在选择连接的机器只能在dispatch里选，
+/// 这样不好，在terminal里应该也能选才对). `switches: false`: the line alone (a page that is not a tab's first).
+struct MacLine: View {
+    var switches = true
+    @Environment(AppModel.self) private var model
+    @Environment(\.interfaceLook) private var look
+
+    private var name: String { model.profile?.name ?? "Mac" }
+
+    var body: some View {
+        if switches, model.macs.servers.count > 1 {
+            Menu {
+                MacSwitchRows()
+            } label: {
+                HStack(spacing: 3) {
+                    words
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                // Room for a finger around a line this small.
+                .padding(.horizontal, 10).padding(.vertical, 3).contentShape(Rectangle())
+            }
+            .accessibilityLabel("切换 Mac，当前为 \(name)")
+        } else {
+            words
+        }
+    }
+
+    private var words: some View {
+        Text(look.isClassic ? "On \(name)" : "@ \(name)").mono(11).foregroundStyle(look.isClassic ? Color.secondary : Theme.signal).lineLimit(1)
+    }
+}
+
+/// A tab's own title with, when more than one Mac is paired, the Mac it shows under it to switch by. One Mac: the
+/// title alone, as before.
+struct MacTabTitle<Mark: View>: View {
+    let title: String
+    @ViewBuilder var mark: Mark
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                mark
+                Text(title).font(.headline)
+            }
+            .accessibilityElement(children: .combine)
+            if model.macs.servers.count > 1 { MacLine() }
+        }
+    }
+}
+
+extension MacTabTitle where Mark == EmptyView {
+    init(title: String) { self.init(title: title) { EmptyView() } }
 }

@@ -299,7 +299,7 @@ const DEV = {
 };
 const dev = (k) => P.sprite(DEV[k], { px: 2 });
 
-const S = { way: "both", keys: "full", phone: "mac", light: false, sel: "mbp", host: "mbp", page: "dispatch", menu: false, step: 1, phoneMac: "mbp" };
+const S = { way: "both", keys: "full", phone: "mac", light: false, sel: "mbp", host: "mbp", page: "dispatch", menu: false, step: 1, phoneMac: "mbp", phoneTab: "dispatch" };
 
 // ---------- the devices and who may use whom ----------
 const NODES = {
@@ -580,14 +580,25 @@ function drawAgg() {
   const chips = merged
     ? `<span class="m on">All Nodes</span><span class="m">MBP ${sq("var(--amber)")}1 ${spin()}1</span><span class="m">mini ${spin()}2</span>`
     : `<span class="m ${S.phoneMac === "mbp" ? "on" : ""}" data-pm="mbp">MacBook Pro ${sq("var(--amber)")}1</span><span class="m ${S.phoneMac === "mini" ? "on" : ""}" data-pm="mini">Mac mini ${spin()}2</span>`;
-  const phone = `<div class="phone"><div class="scr"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
-    <div class="nav">${P.mark({ px: 1.5, state: "waiting" })}<span>${merged ? "All Nodes" : S.phoneMac === "mbp" ? "MacBook Pro" : "Mac mini"}</span><span class="g">⚙</span></div>
+  // The other tabs (2026-11-10, user: 手机上现在选择连接的机器只能在dispatch里选，这样不好，在terminal里应该也能选才对):
+  // the page's own title, and under it the node it shows — the same menu, a tap away on every tab.
+  const nodeName = S.phoneMac === "mbp" ? "MacBook Pro" : "Mac mini";
+  const term = (st, name, where) => `<div class="card"><div class="l1">${st === "w" ? sq("var(--amber)", { blink: true }) : st === "b" ? spin() : `<span class="faint">▫</span>`}<span class="${st === "w" ? "w" : ""}">${name}</span></div><div class="stp">└─ ${where}</div></div>`;
+  const terms = S.phoneMac === "mbp" ? term("w", "claude · AgentSwitch", "~/Projects/AgentSwitch") + term("b", "codex · AgentSwitch", "~/Projects/AgentSwitch") + term("", "claude · Blog", "~/Blog")
+    : term("b", "claude · release", "~/Projects/AgentSwitch") + term("", "opencode · photos", "~/Pictures/Backup");
+  const tabs = `<div class="tabs"><span class="${S.phoneTab === "dispatch" ? "on" : ""}" data-pt="dispatch">Dispatch</span><span class="${S.phoneTab === "terminals" ? "on" : ""}" data-pt="terminals">Terminals</span></div>`;
+  const phone = S.phoneTab === "terminals" && !merged
+    ? `<div class="phone"><div class="scr" style="grid-template-rows:44px 46px minmax(0, 1fr) 54px"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
+    <div class="nav" style="flex-direction:column;gap:1px"><span>Terminals</span><span data-pm="${S.phoneMac === "mbp" ? "mini" : "mbp"}" style="font:11px var(--mono);color:var(--signal);cursor:pointer">@ ${nodeName} <span style="color:#8d8a84">▾</span></span><span class="g" style="top:12px">New</span></div>
+    <div class="feed">${terms}</div>${tabs}</div></div>`
+    : `<div class="phone"><div class="scr"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
+    <div class="nav">${P.mark({ px: 1.5, state: "waiting" })}<span>${merged ? "All Nodes" : nodeName}</span><span class="g">⚙</span></div>
     <div class="macs">${chips}</div><div class="feed">${list}</div><div class="in">＋<span>${merged ? "发给…（先选节点）" : "输入任务或问题"}</span></div>
-    <div class="tabs"><span class="on">Dispatch</span><span>Terminals</span></div></div></div>`;
+    ${tabs}</div></div>`;
   el.innerHTML = screen + phone;
   document.getElementById("capAgg").innerHTML = `菜单栏的实时活动汇总这台 Mac 和它用着的节点：胶囊里是总数，卡片按节点分组（本机在前），等你的照常能在卡上直接答。手机：${merged
     ? "<b>Merged</b>——所有节点的任务合成一条记录，每张卡带节点标签；但对话是和某一个节点的助理说的，发消息前要先选节点，记录也就不再是一段对话。"
-    : "<b>Per Node（建议）</b>——同时连着所有节点（不再“一次只连一台”），顶上一排节点标签带各自的等你 / 在跑计数，点一下换台；记录与输入框仍是那一个节点的对话。等你的提醒、实时活动汇总所有节点，不会因为看着别的节点而漏掉。"}`;
+    : (S.phoneTab === "terminals" ? "<b>Terminals（已做，2026-11-10）</b>——别的标签页（Terminals、Browser、Files）标题下面一行写着正在看的节点（像素外观 <b>@ 节点名</b>、信号色；经典外观 On 节点名），配了一台以上时它就是切换菜单（演示里点一下换台，应用里是系统菜单，末尾有 Add Mac）。只配了一台时没有这一行。<br>" : "") + "<b>Per Node（建议）</b>——同时连着所有节点（不再“一次只连一台”），顶上一排节点标签带各自的等你 / 在跑计数，点一下换台；记录与输入框仍是那一个节点的对话。等你的提醒、实时活动汇总所有节点，不会因为看着别的节点而漏掉。"}`;
 }
 
 // ---------- events ----------
@@ -613,6 +624,8 @@ document.addEventListener("click", (e) => {
   if (step) { S.step = +step.dataset.step; drawPair(); return; }
   const pm = e.target.closest("[data-pm]");
   if (pm) { S.phoneMac = pm.dataset.pm; drawAgg(); return; }
+  const pt = e.target.closest("[data-pt]");
+  if (pt) { S.phoneTab = pt.dataset.pt; drawAgg(); return; }
   if (S.menu && !e.target.closest(".menu")) { S.menu = false; drawWin(); }
 });
 setInterval(() => { frame++; for (const s of document.querySelectorAll("[data-spin]")) s.textContent = SPIN[frame % SPIN.length]; }, 90);

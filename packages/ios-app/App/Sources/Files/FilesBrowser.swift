@@ -182,7 +182,8 @@ struct FolderPage: View {
                 if session.selecting && session.asksTerminal {
                     Text("\(session.picked.count) Selected").mono(11).foregroundStyle(.secondary).lineLimit(1)
                 } else {
-                    Text(look.isClassic ? "On \(mac)" : "@ \(mac)").mono(11).foregroundStyle(look.isClassic ? Color.secondary : Theme.signal).lineLimit(1)
+                    // The tab's first page switches Macs; a folder further in, or a sheet over a terminal, only says which.
+                    MacLine(switches: first && session.inTab)
                 }
             }
         }

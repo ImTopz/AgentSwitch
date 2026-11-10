@@ -64,11 +64,9 @@ struct BrowserTab: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 7) {
+                    MacTabTitle(title: "Browser") {
                         PixelSprite(rows: PixelArt.globe, pixel: 1, color: Theme.ink, strength: 1, shadow: false, cell: 0.7)
-                        Text("Browser").font(.headline)
                     }
-                    .accessibilityElement(children: .combine)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button { creating = true } label: { LookGlyph(glyph: "+", symbol: "plus", size: 20, weight: .regular) }
