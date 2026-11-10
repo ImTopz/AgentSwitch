@@ -12,6 +12,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
+import { subagentOf } from "../sessions/subagents.js";
 import { attachHeld, endHeld, HoldError, startHeld, type HoldPlace, type Holding } from "./held.js";
 import { keySequence, replyBytes, type KeyContext } from "./keys.js";
 import { choicesOnScreen, type ScreenChoices } from "./screenChoices.js";
@@ -20,6 +21,11 @@ import { screenView } from "./screenView.js";
 
 export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
 export type TerminalHarness = (typeof TERMINAL_HARNESSES)[number];
+/** What a terminal runs: one of the agents, or the user's own shell (docs/terminal-v0.md §0, 2026-11-10; user: 似乎没有
+ *  打开终端的地方). A shell is this Mac's own: only a local caller starts one, and a paired device neither sees one nor
+ *  reaches one (api/terminals.ts). It is no agent: no session, no model, no hooks, nothing it asks. */
+export const SHELL = "shell";
+export type TerminalKind = TerminalHarness | typeof SHELL;
 /** How the agent asks before acting: every time, its own automatic mode, or not at all (bypass). The protected paths
  *  stay closed in every mode (the PreToolUse floor). */
 export const PERMISSION_MODES = ["manual", "auto", "bypass"] as const;
@@ -48,7 +54,7 @@ export type PermissionReply = { readonly decision: PermissionDecision; readonly 
 
 export type TerminalInfo = {
   readonly id: string;
-  readonly harness: TerminalHarness;
+  readonly harness: TerminalKind;
   readonly cwd: string;
   /** Where the agent works now: the `cwd` its hook calls carry (it changes as the agent `cd`s), else `cwd`. */
   readonly workdir: string;
@@ -177,7 +183,7 @@ export type TerminalEvent =
 
 /** What a launcher gets: the new terminal's id and hook token go into the agent's env. */
 export type LaunchRequest = {
-  readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; readonly model?: string; readonly resume?: string;
+  readonly id: string; readonly harness: TerminalKind; readonly cwd: string; readonly model?: string; readonly resume?: string;
   /** How hard it thinks, in the agent's own word for the level (harness/efforts.ts); absent: the agent's default. */
   readonly effort?: string;
   /** Continue `resume` as a new session with its history, instead of the same session. */
@@ -368,7 +374,7 @@ export async function endLeftHeld(dir: string, log: (line: string) => void = (li
 export type KeptTerminal = {
   readonly v: 1;
   readonly id: string;
-  readonly harness: TerminalHarness;
+  readonly harness: TerminalKind;
   readonly cwd: string;
   readonly model: string | null;
   readonly mode: PermissionMode;
@@ -446,7 +452,7 @@ const TITLE_GLYPHS = /^[\s✳✶✷✸✹✺✻✼✽✢✣✤✥*·•●○◐
 /** Codex puts this in front of its title while something waits for you (`!` and `.` alternating): left out of the name,
  *  which would otherwise blink. Status comes from its notifications instead (OSC 9, launch.ts CODEX_ATTENTION). */
 const ACTION_REQUIRED = /^\[ [!.] \] Action Required(?:\s*\|\s*)?/;
-const AGENT_LABELS: Record<TerminalHarness, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi" };
+const AGENT_LABELS: Record<TerminalKind, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", shell: "Shell" };
 
 /** The title without the agent's status glyphs and markers. */
 export function cleanTitle(raw: string): string {
@@ -455,17 +461,19 @@ export function cleanTitle(raw: string): string {
 
 
 /** A title worth showing: not the agent's own name, a bare program name or a shell's `user@host: dir`. */
-export function meaningfulTitle(title: string, harness: TerminalHarness): string | null {
+export function meaningfulTitle(title: string, harness: TerminalKind): string | null {
   const t = cleanTitle(title);
   if (!t) return null;
   const low = t.toLowerCase();
-  if ([harness, AGENT_LABELS[harness].toLowerCase(), "claude", "node", "zsh", "bash"].includes(low)) return null;
+  if ([harness, AGENT_LABELS[harness].toLowerCase(), "claude", "node", "zsh", "bash", "-zsh", "-bash", "fish", "sh"].includes(low)) return null;
   if (/^[\w.-]+@[\w.-]+:/.test(t) || /^[~/]/.test(t)) return null;
   return t;
 }
 
 /** The name the screens show (see TerminalInfo.name); `given` is the title of the session a terminal continues. */
-export function terminalName(custom: string | null, title: string, harness: TerminalHarness, cwd: string, given: string | null = null): string {
+export function terminalName(custom: string | null, title: string, harness: TerminalKind, cwd: string, given: string | null = null): string {
+  // A shell is listed under its folder already: it is called what it is, until it is given a name or names what runs.
+  if (harness === SHELL) return custom ?? meaningfulTitle(title, harness) ?? AGENT_LABELS[harness];
   return custom ?? meaningfulTitle(title, harness) ?? given ?? (basename(cwd) || AGENT_LABELS[harness]);
 }
 /** What is being written is cut at this many characters (an answer is seldom longer; a screen shows its end). */
@@ -879,7 +887,7 @@ class Session {
   kitty: number[] = [];
   heldTimer: NodeJS.Timeout | null = null;
 
-  constructor(readonly id: string, readonly harness: TerminalHarness, readonly cwd: string, readonly model: string | null, readonly mode: PermissionMode, readonly hookToken: string,
+  constructor(readonly id: string, readonly harness: TerminalKind, readonly cwd: string, readonly model: string | null, readonly mode: PermissionMode, readonly hookToken: string,
     readonly createdAt: number, public cols: number, public rows: number, scrollback: number) {
     this.term = new headless.Terminal({ cols, rows, scrollback, allowProposedApi: true });
     this.ser = new serialize.SerializeAddon();
@@ -943,7 +951,7 @@ export class TerminalHost {
 
   /** Starts an agent. The terminal is listed from the moment it is made (a second resume of the same session finds it),
    *  while a companion starts; the program follows. */
-  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number; profile?: { id: string; name: string; /** Absent: it runs in the Mac's own folder. */ home?: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string; color?: string; api?: { baseUrl?: string; model?: string }; telemetryOff?: true }; signIn?: true }): Promise<TerminalInfo> {
+  async spawn(req: { harness: TerminalKind; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number; profile?: { id: string; name: string; /** Absent: it runs in the Mac's own folder. */ home?: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string; color?: string; api?: { baseUrl?: string; model?: string }; telemetryOff?: true }; signIn?: true }): Promise<TerminalInfo> {
     if (!this.helperChecked) { ensureSpawnHelper(); this.helperChecked = true; }
     const id = randomUUID().slice(0, 8);
     const hookToken = randomBytes(24).toString("base64url");
@@ -963,7 +971,7 @@ export class TerminalHost {
     s.resumedFrom = req.resume ?? null;
     s.forked = Boolean(req.resume && req.fork && req.harness !== "opencode");
     // Continued in place, the agent writes the session it was given (its hooks say the same once they run).
-    if (req.resume && !s.forked) { s.agentSessionId = req.resume; this.opts.onSession?.(s.harness, req.resume, s.profile?.id ?? null); }
+    if (req.resume && !s.forked && s.harness !== SHELL) { s.agentSessionId = req.resume; this.opts.onSession?.(s.harness, req.resume, s.profile?.id ?? null); }
     s.givenName = req.name?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null;
     // Codex's notifications (OSC 9) are only those for what waits for you (launch.ts CODEX_ATTENTION).
     if (req.harness === "codex") s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
@@ -1129,8 +1137,8 @@ export class TerminalHost {
       if (after !== before) s.emit({ type: "name", name: after });
       this.titled(s);
     });
-    if (kept.agentSessionId) { s.agentSessionId = kept.agentSessionId; this.opts.onSession?.(s.harness, kept.agentSessionId, s.profile?.id ?? null); }
-    if (kept.companion && hold.companion) s.companion = hold.companion(kept.harness, kept.companion, kept);
+    if (kept.agentSessionId && s.harness !== SHELL) { s.agentSessionId = kept.agentSessionId; this.opts.onSession?.(s.harness, kept.agentSessionId, s.profile?.id ?? null); }
+    if (kept.companion && hold.companion && kept.harness !== SHELL) s.companion = hold.companion(kept.harness, kept.companion, kept);
     this.sessions.set(kept.id, s);
     this.wire(s, held);
     // The holder sends what it kept; once that is in, the program draws its screen whole again.
@@ -1434,7 +1442,7 @@ export class TerminalHost {
    *  null: the Mac's own. */
   profileOf(id: string, token: string): { readonly harness: TerminalHarness; readonly profile: string | null } {
     const s = this.sessions.get(id);
-    if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
+    if (!s || !same(token, s.hookToken) || s.harness === SHELL) throw new TerminalError("forbidden", "unknown terminal or hook token");
     return { harness: s.harness, profile: s.profile?.id ?? null };
   }
 
@@ -1448,7 +1456,8 @@ export class TerminalHost {
    *  until `signal` aborts: the hook command went away, which happens when the request was answered in the terminal. */
   async hook(id: string, token: string, call: HookCall, signal?: AbortSignal): Promise<HookAnswer> {
     const s = this.sessions.get(id);
-    if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
+    // A shell has no hooks (its token is given to nothing): whatever runs in one cannot speak for it.
+    if (!s || !same(token, s.hookToken) || s.harness === SHELL) throw new TerminalError("forbidden", "unknown terminal or hook token");
     const p = call.payload;
     if (typeof p.session_id === "string" && p.session_id) {
       this.reported(s, p.session_id);
@@ -1593,6 +1602,7 @@ export class TerminalHost {
   /** The agent says which session it writes. A new terminal's or a fork's first one is its own; a later one (`/resume`
    *  typed inside it) is followed, never owned, so closing the terminal cannot delete a record it did not start. */
   private reported(s: Session, sessionId: string): void {
+    if (s.harness === SHELL) return;
     // A profile that had never run had no device of its own when the terminal started; it has one by now.
     s.device ??= this.device(s);
     if (s.agentSessionId !== sessionId) {
@@ -2030,7 +2040,7 @@ export class TerminalHost {
    *  changes — the one standing when a terminal begins another session (`/clear`) was the session's before. */
   private titled(s: Session): void {
     const title = meaningfulTitle(s.title, s.harness);
-    if (title && s.agentSessionId) this.opts.onTitle?.(s.harness, s.agentSessionId, title);
+    if (title && s.agentSessionId && s.harness !== SHELL) this.opts.onTitle?.(s.harness, s.agentSessionId, title);
   }
 
   /** Its screen is read for the line that says it is trying to reach its service again (`troubleOnScreen`): a notice
@@ -2104,14 +2114,21 @@ export class TerminalHost {
     this.doing(s);
   }
 
-  /** A sub-agent at work: named by what the Agent tool call that started it was sent to do (the oldest waiting one of
-   *  its kind, else the oldest), else by its kind. */
+  /** A sub-agent at work: named by what Claude Code itself wrote of it beside its file (sessions/subagents.ts: what
+   *  this very one was sent to do, and when it began), else by what the Agent tool call that started it was sent to do
+   *  (the oldest waiting one of its kind, else the oldest), else by its kind. One not seen starting — taken in by a
+   *  tool call of its own, as a background one is that works on after the turn that sent it ended — has only the
+   *  first to go by: it came back named by its kind (`general-purpose`), its clock starting over (2026-11-10). */
   private subagentStarted(s: Session, id: string, type: string): void {
     const now = this.o.now();
     s.launches = s.launches.filter((l) => now - l.at < LAUNCH_MS);
-    const i = Math.max(s.launches.findIndex((l) => l.type === type), s.launches.length ? 0 : -1);
+    const kept = s.harness === "claude-code" && s.recordFile ? subagentOf(s.recordFile, id) : null;
+    const said = kept?.name.slice(0, MAX_NAME) ?? "";
+    // The call that sent it: the one that says the same, where Claude Code says what it was sent to do.
+    const same = said ? s.launches.findIndex((l) => l.name === said) : -1;
+    const i = same >= 0 ? same : Math.max(s.launches.findIndex((l) => l.type === type), s.launches.length ? 0 : -1);
     const [launch] = i >= 0 ? s.launches.splice(i, 1) : [];
-    s.subagents.set(id, { id, type: type || launch?.type || "agent", name: launch?.name || type || "agent", activity: null, since: now });
+    s.subagents.set(id, { id, type: type || kept?.type || launch?.type || "agent", name: said || launch?.name || type || "agent", activity: null, since: kept ? Math.min(kept.startedAt, now) : now });
     this.doing(s);
   }
 
@@ -2181,6 +2198,7 @@ export class TerminalHost {
   }
 
   private device(s: Session): string | null {
+    if (s.harness === SHELL) return null;
     try { return this.opts.deviceOf?.(s.harness, s.profile?.id ?? null) ?? null; } catch { return null; }
   }
 

@@ -261,7 +261,9 @@ struct ClassicSpinner: View {
 }
 
 /// Waiting for you: an amber dot whose ring breathes (BlinkingSquare's classic side); still under Reduce Motion and
-/// while it is not seen.
+/// while it is not seen. Breathing, the ring is a layer Core Animation moves (`WaitingRing`, LayerMotion.swift;
+/// ui-v0 §7.4, 2026-11-10): eased by SwiftUI from one step of a timeline to the next, it had the whole window laid out
+/// again at every frame for as long as something waited.
 struct ClassicWaitingDot: View {
     var color: Color = .waiting
     var side: CGFloat = 8
@@ -271,20 +273,16 @@ struct ClassicWaitingDot: View {
     var body: some View {
         Group {
             if reduceMotion || !onScreen {
-                dot(out: false)
+                Circle().fill(color).overlay(Circle().stroke(color.opacity(Double(WaitingRingView.strengths.in)), lineWidth: WaitingRingView.lineWidth(side: side))
+                    .scaleEffect(WaitingRingView.scales.in))
             } else {
-                TimelineView(.periodic(from: Motion.epoch, by: Motion.blink)) { timeline in
-                    dot(out: Motion.step(at: timeline.date, every: Motion.blink) % 2 == 1)
-                        .animation(.easeInOut(duration: Motion.blink), value: Motion.step(at: timeline.date, every: Motion.blink))
+                // Room for the ring at its widest, round the dot's middle.
+                Circle().fill(color).overlay {
+                    WaitingRing(color: NSColor(color), side: side).frame(width: side * 2.5, height: side * 2.5).allowsHitTesting(false).accessibilityHidden(true)
                 }
             }
         }
         .frame(width: side, height: side)
-    }
-
-    private func dot(out: Bool) -> some View {
-        Circle().fill(color)
-            .overlay(Circle().stroke(color.opacity(out ? 0 : 0.5), lineWidth: max(1, side * 0.16)).scaleEffect(out ? 1.9 : 1.3))
     }
 }
 

@@ -14,7 +14,8 @@ import { codexFacts, codexMessages } from "./codex.js";
 import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
 import { piFacts, piMessages } from "./pi.js";
 import type { KeptPictures } from "./pictures.js";
-import { MAX_RECORD_LIMIT, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, type FileDiff, type RecordImage, type SessionRecord, type StepDetail } from "./record.js";
+import { fileRev, MAX_RECORD_LIMIT, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, type FileDiff, type RecordImage, type SessionRecord, type StepDetail } from "./record.js";
+import { listSubagents, subagentFile, subagentOf, type SubagentSummary } from "./subagents.js";
 import { ACTIVE_MS, MESSAGE_CHARS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionMode, type SessionSummary } from "./types.js";
 
 export type SessionSources = {
@@ -172,6 +173,61 @@ export class SessionMonitor {
     const found = this.open(harness, id, ours);
     if (!found?.path || (harness !== "claude-code" && harness !== "codex")) return null;
     try { return readImage(harness, found.path, item, n, this.sources.pictures?.sent); } catch { return null; }
+  }
+
+  // -------------------------------------------------------------------------------------------------------------------
+  // a session's sub-agents (sessions/subagents.ts; docs/simple-view-v0.md §5.22)
+  // -------------------------------------------------------------------------------------------------------------------
+
+  /** The sub-agents a session sent off, in the order they started. Null for a session that may not be read here (not
+   *  listed, not a terminal of ours); none for an agent whose sub-agents are not kept as files of their own (only
+   *  Claude Code's are). */
+  subagents(harness: SessionHarness, id: string, ours = false): SubagentSummary[] | null {
+    const found = this.open(harness, id, ours);
+    if (!found) return null;
+    return found.path && harness === "claude-code" ? listSubagents(found.path) : [];
+  }
+
+  /** Sub-agent `agent` of a session: what Claude Code says of it, its file, and the session it is of. */
+  private side(harness: SessionHarness, id: string, agent: string, ours: boolean): { session: SessionSummary; about: SubagentSummary; file: string } | null {
+    if (harness !== "claude-code") return null;
+    const found = this.open(harness, id, ours);
+    if (!found?.path) return null;
+    const about = subagentOf(found.path, agent), file = subagentFile(found.path, agent);
+    return about && file ? { session: found.session, about, file } : null;
+  }
+
+  /** The version of a sub-agent's record: its file's, and whether it has ended (Claude Code marks that beside the
+   *  file, after its last line). Null when there is no such sub-agent. A screen that shows the record asks with the
+   *  version it has (`subagentRecord`), every second or so while the sub-agent works: nothing is read for the same one. */
+  subagentVersion(harness: SessionHarness, id: string, agent: string, ours = false): string | null {
+    const side = this.side(harness, id, agent, ours);
+    try { return side && `${fileRev(side.file).rev}${side.about.done ? "-done" : ""}`; } catch { return null; }
+  }
+
+  /** A sub-agent's record: what it was sent to do, its work step by step, what it handed back — read as a session's
+   *  record is, from its own file. `rev` is `subagentVersion`'s. */
+  subagentRecord(harness: SessionHarness, id: string, agent: string, o: { limit?: number; before?: number } = {}, ours = false): { session: SessionSummary; agent: SubagentSummary; record: SessionRecord } | null {
+    const side = this.side(harness, id, agent, ours);
+    if (!side) return null;
+    try {
+      const record = readRecord("claude-code", side.file, { ...o, cwd: side.session.cwd, side: true });
+      return record && { session: side.session, agent: side.about, record: { ...record, rev: `${record.rev}${side.about.done ? "-done" : ""}` } };
+    } catch { return null; }
+  }
+
+  /** One step of a sub-agent's run of work, whole. */
+  subagentStep(harness: SessionHarness, id: string, agent: string, work: string, n: number, ours = false): StepDetail | null {
+    const side = this.side(harness, id, agent, ours);
+    if (!side) return null;
+    try { return readStep("claude-code", side.file, { work, n, cwd: side.session.cwd, side: true }); } catch { return null; }
+  }
+
+  /** A picture a step of a sub-agent's brought back. */
+  subagentStepImage(harness: SessionHarness, id: string, agent: string, work: string, n: number, k: number, ours = false): RecordImage | null {
+    const side = this.side(harness, id, agent, ours);
+    if (!side) return null;
+    try { return readStepImage("claude-code", side.file, { work, n, k, cwd: side.session.cwd, side: true }); } catch { return null; }
   }
 
   /** A session and where it is kept. `ours`: it is the session of a terminal of ours, read wherever it runs — the list

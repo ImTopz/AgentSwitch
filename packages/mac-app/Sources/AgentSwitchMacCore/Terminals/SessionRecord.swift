@@ -25,10 +25,14 @@ public struct RecordStep: Decodable, Sendable, Hashable {
     public let removed: Int?
     /// Pictures the step brought back (a picture file read, a screenshot taken): how many.
     public let images: Int
+    /// The sub-agent the step sent off, by its id, once the record says which: what it did is a record of its own,
+    /// opened by this (`Subagents.swift`). Nil for any other step, and from a service that does not say.
+    public let agent: String?
 
     public init(kind: Kind, text: String, tool: String? = nil, note: String? = nil, out: String? = nil, failed: Bool = false, added: Int? = nil, removed: Int? = nil,
-                images: Int = 0) {
+                images: Int = 0, agent: String? = nil) {
         self.images = max(0, images)
+        self.agent = agent
         self.kind = kind
         self.text = text
         self.tool = tool
@@ -39,11 +43,12 @@ public struct RecordStep: Decodable, Sendable, Hashable {
         self.removed = removed
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, text, tool, note, out, failed, added, removed, images }
+    private enum CodingKeys: String, CodingKey { case kind, text, tool, note, out, failed, added, removed, images, agent }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         images = max(0, (try? c.decodeIfPresent(Int.self, forKey: .images)) ?? 0)
+        agent = (try? c.decodeIfPresent(String.self, forKey: .agent)).flatMap { $0.isEmpty ? nil : $0 }
         let raw = (try? c.decode(String.self, forKey: .kind)) ?? ""
         kind = Kind(rawValue: raw) ?? .tool
         text = (try? c.decode(String.self, forKey: .text)) ?? ""

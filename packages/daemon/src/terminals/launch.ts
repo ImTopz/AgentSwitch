@@ -8,15 +8,16 @@ import { codexHookArgs } from "./codexHooks.js";
 import { CodexCompanion } from "./codexTerminal.js";
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { which } from "../util/which.js";
 import { fileURLToPath } from "node:url";
 import { withoutCredentialRepair } from "../executors/gate.js";
 import { CODEX_FILE_STORE } from "./signIn.js";
 import { protectedDeny } from "../executors/opencodeShared.js";
 import { rootSpellings, type ProtectedPaths } from "../executors/protected.js";
-import type { Companion, LaunchPlan, LaunchRequest, Launcher, TerminalHarness } from "./host.js";
+import { SHELL, type Companion, type LaunchPlan, type LaunchRequest, type Launcher, type TerminalHarness } from "./host.js";
 import type { Holding } from "./held.js";
 
 /** The hook command's script next to this module: hookClient.js in dist/, hookClient.ts under tsx (node strips its types). */
@@ -32,6 +33,8 @@ export const QUICK_HOOK_TIMEOUT_S = 10;
 export type LauncherOptions = {
   /** Agent executables; a missing one cannot be started. */
   readonly binaries: Partial<Record<TerminalHarness, string>>;
+  /** The program a shell terminal runs; absent: the user's own shell (`userShell`). */
+  readonly shell?: string;
   /** The service's local URL the hook command calls (http://127.0.0.1:<port>). */
   readonly hookUrl: () => string;
   /** Per-terminal files (settings, MCP config) go under here: `<dir>/<id>/`. The managed executors may not read it. */
@@ -229,6 +232,21 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
   };
 }
 
+/** The user's shell: the one their account names, else the environment's, else zsh (a Mac's own since 10.15). */
+export function userShell(env: Record<string, string | undefined>): string {
+  let named: string | null = null;
+  try { named = userInfo().shell; } catch { /* no such user (a container): the environment's */ }
+  for (const file of [named, env.SHELL]) if (file && isAbsolute(file) && existsSync(file)) return file;
+  return "/bin/zsh";
+}
+
+/** With a locale that reads UTF-8 where the environment names none (a service started outside a login session): a
+ *  shell without one cannot take what is typed in Chinese, and lists such file names as question marks. `LC_CTYPE`
+ *  alone, as a terminal app sets it when it knows no more: the language of messages stays the system's. */
+export function withTextLocale(env: Record<string, string>): Record<string, string> {
+  return env.LANG || env.LC_ALL || env.LC_CTYPE ? env : { ...env, LC_CTYPE: "UTF-8" };
+}
+
 export function agentLauncher(opts: LauncherOptions): Launcher {
   const node = opts.node ?? process.execPath;
   const script = opts.hookScript ?? HOOK_SCRIPT;
@@ -238,6 +256,14 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
   // The browser session made for the plan being made (a launch is synchronous).
   let minted: BridgeCommand["minted"] | null = null;
   const plans = (req: LaunchRequest): LaunchPlan => {
+    // The user's own shell (docs/terminal-v0.md §0, 2026-11-10), as a terminal app starts it: a login shell in the
+    // folder, with the service's environment. It is no agent: none of this terminal's hook variables (what runs in it
+    // cannot speak for it), nothing written for it, and its status is not guessed from what it prints — `hooks`, of
+    // which it has none, so it is idle until it ends.
+    if (req.harness === SHELL) {
+      const env = { ...withoutParentSession(withoutCredentialRepair(opts.env ?? process.env)), TERM: "xterm-256color", COLORTERM: "truecolor" };
+      return { file: opts.shell ?? userShell(env), args: ["-l"], env: withTextLocale(env), hooks: true };
+    }
     const file = opts.binaries[req.harness];
     if (!file) throw new Error(`${req.harness} is not installed on this Mac`);
     const dir = join(opts.stateDir, req.id);

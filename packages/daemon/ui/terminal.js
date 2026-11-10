@@ -64,7 +64,8 @@ const AGENTS = [
   { id: "opencode", name: "OpenCode" },
   { id: "pi", name: "pi" },
 ];
-const AGENT = Object.fromEntries(AGENTS.map((a) => [a.id, a.name]));
+// With a shell, which this page lists and shows but does not start (docs/terminal-v0.md §0, 2026-11-10): it is no agent.
+const AGENT = { ...Object.fromEntries(AGENTS.map((a) => [a.id, a.name])), shell: "Shell" };
 const RESUMABLE = new Set(["claude-code", "codex", "opencode", "pi"]);
 /** Sessions whose record can be deleted here (OpenCode keeps them in its database). */
 // Every agent's sessions can be deleted (docs/terminal-v0.md §5; OpenCode and pi since 2026-10-01).
