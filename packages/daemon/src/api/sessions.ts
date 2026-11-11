@@ -46,7 +46,8 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
       return profile ? { ...s, profile } : s;
     });
   };
-  // The folders the user shows or hides in the list (sessions/shownFolders.ts). This Mac's screens only.
+  // The folders the user shows or hides in the list (sessions/shownFolders.ts). Paired devices too (remote/routes.ts):
+  // a Mac looking at this one from elsewhere said them and got `not found` (2026-11-11).
   const folders = deps.sessionFolders;
   if (folders) {
     app.get("/sessions/folders", (c) => c.json(folders.get()));

@@ -76,6 +76,10 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/sessions/search"],
   ["DELETE", "/sessions/:harness/:id"],
   ["POST", "/sessions/delete"],
+  // The folders the list shows and hides (sessions/shownFolders.ts): a Mac looking at this one says them as its own
+  // window does; a device that may delete sessions may say which folders are listed.
+  ["GET", "/sessions/folders"],
+  ["POST", "/sessions/folders"],
   ["GET", "/terminals"],
   ["GET", "/terminals/style"],
   ["POST", "/terminals"],
