@@ -55,6 +55,9 @@ interface PlatformServices {
     fun discovery(): ServiceDiscovery?
     fun paths(): PathMonitoring?
     val deviceName: String
+
+    /** The way to the Mac's LAN address around a VPN on the phone, where there is one (kit `DirectRoute`). */
+    fun directRoute(): com.agentswitch.kit.connection.DirectRoute? = null
 }
 
 /**
@@ -196,7 +199,7 @@ class AppModel(
      * is added. Nothing saved changes unless the pairing succeeded.
      */
     suspend fun pair(payload: PairingPayload, deviceName: String) {
-        val transport = PinnedSessionTransport(payload.fp)
+        val transport = PinnedSessionTransport(payload.fp, services?.directRoute())
         val outcome = PairingService(transport, services?.discovery()).pair(payload, deviceName)
         vault.save(outcome.token, outcome.profile.tokenAccount)
         stopConnection()
@@ -279,7 +282,7 @@ class AppModel(
             connection = ConnectionState.Unauthorized
             return
         }
-        connect(token, PinnedSessionTransport(current.fingerprint))
+        connect(token, PinnedSessionTransport(current.fingerprint, services?.directRoute()))
     }
 
     private fun connect(token: String, transport: PinnedSessionTransport) {

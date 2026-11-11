@@ -1,5 +1,13 @@
 package com.agentswitch.kit.api
 
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Mutex
+import javax.net.ssl.SSLSocket
+import javax.net.SocketFactory
+import java.util.concurrent.ConcurrentHashMap
+import java.net.Socket
+import java.net.InetSocketAddress
+import com.agentswitch.kit.connection.DirectRoute
 import java.io.File
 import java.io.IOException
 import java.io.InterruptedIOException
@@ -16,6 +24,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.time.Duration
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -149,10 +158,35 @@ interface HTTPTransport {
  * write twice: a connection nobody uses is let go before the Mac lets it go ([idleKeepMs]); after a silence longer
  * than that — the phone slept, Android froze the app — the kept ones go before the first request (`freshen`); and a
  * read (`GET`, `HEAD`) that fails on its connection is asked once more on a new one (`mayBeStale`).
+ *
+ * A VPN on the phone (`direct`, [DirectRoute]). Where the platform says a VPN carries this app's traffic and the
+ * host is a local network's, the way around the VPN is tried before a request goes out: a connection and the pinned
+ * handshake, no request, within [directConnectMs]. If the Mac answers there, requests to that host go that way —
+ * through a client of their own, with connections of its own — for [directKeepMs] before it is tried again; if not
+ * (the VPN is the way to the Mac, or something else has that address on this Wi-Fi, which the pin tells), they go the
+ * usual way and the other is tried again after [directRetryMs]. A request that fails on the way around forgets it.
+ *
+ * Threads. Everything here runs off the caller's thread (`Dispatchers.IO`): Android forbids the network on the main
+ * thread, and closing a response is the network — a TLS connection is written to as it closes, an unread body is
+ * read to its end. A response that arrives for a caller no longer waiting (two addresses of one Mac both answer a
+ * probe and the slower is cancelled) used to be closed where the caller ran, and the app closed with it
+ * (2026-11-12, on the first real phone; an emulator finds no second address).
  */
-class PinnedSessionTransport(val fingerprint: String) : HTTPTransport {
+class PinnedSessionTransport(val fingerprint: String, private val direct: DirectRoute? = null) : HTTPTransport {
     private val delegate = PinnedTrustDelegate(fingerprint)
     private val client: OkHttpClient = defaultClient(delegate)
+
+    /** The handshake of the way around a VPN is made by hand (reaches): the same pinned trust. */
+    private val tls: SSLContext by lazy { SSLContext.getInstance("TLS").apply { init(null, arrayOf(delegate), null) } }
+
+    /** What was learnt about a host on the way around: whether the Mac answered there, by which factory, when. */
+    private class Reach(val factory: SocketFactory, val answered: Boolean, val at: Long)
+    private val reach = ConcurrentHashMap<String, Reach>()
+    private val deciding = Mutex()
+
+    /** The client whose connections go around the VPN: one, for the network there is now. */
+    private class Around(val factory: SocketFactory, val client: OkHttpClient)
+    private var around: Around? = null
 
     companion object {
         /**
@@ -167,6 +201,16 @@ class PinnedSessionTransport(val fingerprint: String) : HTTPTransport {
 
         /** How long a connection nobody uses is kept: less than the 5 seconds the Mac's service keeps its end. */
         const val idleKeepMs = 4_000L
+
+        /** How long the way around a VPN is given to connect: a Mac on the same Wi-Fi answers in a few milliseconds. */
+        const val directConnectMs = 800L
+
+        /** And how long for its handshake after that. */
+        const val directHandshakeMs = 1_500L
+
+        /** How long a way around that answered is used before it is tried again, and one that did not is left alone. */
+        const val directKeepMs = 60_000L
+        const val directRetryMs = 15_000L
 
         /** The client of one paired Mac: pinned trust, any host name, nothing stored, nothing retried. */
         fun defaultClient(trust: PinnedTrustDelegate): OkHttpClient {
@@ -214,7 +258,65 @@ class PinnedSessionTransport(val fingerprint: String) : HTTPTransport {
     private fun freshen() {
         val now = System.currentTimeMillis()
         val last = lastRequest.getAndSet(now)
-        if (now - last > idleKeepMs || now < last) client.connectionPool.evictAll()
+        if (now - last > idleKeepMs || now < last) {
+            client.connectionPool.evictAll()
+            synchronized(this) { around }?.client?.connectionPool?.evictAll()
+        }
+    }
+
+    /**
+     * The client a request goes out by: the one around a VPN when the platform names such a way for the host and the
+     * Mac answers there, else the usual one.
+     */
+    private suspend fun clientFor(request: Request): OkHttpClient {
+        val direct = direct ?: return client
+        val host = request.url.host
+        val port = request.url.port
+        val factory = direct.socketFactory(host) ?: return client
+        val key = "$host:$port"
+        val known = deciding.withLock {
+            val now = System.currentTimeMillis()
+            val held = reach[key]
+            if (held != null && held.factory === factory && now - held.at in 0 until (if (held.answered) directKeepMs else directRetryMs)) held
+            else {
+                val answered = withContext(Dispatchers.IO) { reaches(factory, host, port) }
+                Reach(factory, answered, System.currentTimeMillis()).also { reach[key] = it }
+            }
+        }
+        return if (known.answered) aroundClient(factory) else client
+    }
+
+    /** Whether the Mac — the paired certificate — answers at `host` by `factory`'s network: no request is sent. */
+    private fun reaches(factory: SocketFactory, host: String, port: Int): Boolean {
+        var raw: Socket? = null
+        try {
+            raw = factory.createSocket()
+            raw.connect(InetSocketAddress(host, port), directConnectMs.toInt())
+            raw.soTimeout = directHandshakeMs.toInt()
+            (tls.socketFactory.createSocket(raw, host, port, true) as SSLSocket).use { it.startHandshake() }
+            return true
+        } catch (_: Exception) {
+            // Not there this way — or something else has this address on this network, which the pin refused: what
+            // the pin saw of it is not said of the Mac.
+            delegate.takeMismatch(host)
+            return false
+        } finally {
+            try { raw?.close() } catch (_: Exception) { }
+        }
+    }
+
+    private fun aroundClient(factory: SocketFactory): OkHttpClient = synchronized(this) {
+        around?.takeIf { it.factory === factory }?.client ?: run {
+            around?.client?.connectionPool?.evictAll()
+            // Connections of its own: a pool does not tell connections apart by how their sockets were made.
+            client.newBuilder().socketFactory(factory).connectionPool(ConnectionPool(maxConnections, idleKeepMs, TimeUnit.MILLISECONDS)).build()
+                .also { around = Around(factory, it) }
+        }
+    }
+
+    /** A request failed on the way around: the next one finds out again which way there is. */
+    private fun forgetReach(request: Request, via: OkHttpClient) {
+        if (via !== client) reach.remove("${request.url.host}:${request.url.port}")
     }
 
     /**
@@ -230,8 +332,9 @@ class PinnedSessionTransport(val fingerprint: String) : HTTPTransport {
      * One attempt at a stream's response head, the request's timeout bounding the wait. `null` (only with `again`):
      * it failed in the way [mayBeStale] describes and may be asked once more.
      */
-    private suspend fun streamHead(ok: Request, request: HTTPRequest, again: Boolean): Pair<Call, Response>? {
-        val call = client.newCall(ok)
+    private suspend fun streamHead(ok: Request, request: HTTPRequest, again: Boolean): Pair<Call, Response>? = withContext(Dispatchers.IO) {
+        val via = clientFor(ok)
+        val call = via.newCall(ok)
         val timedOut = AtomicBoolean(false)
         try {
             val response = coroutineScope {
@@ -242,12 +345,16 @@ class PinnedSessionTransport(val fingerprint: String) : HTTPTransport {
                 }
                 try { call.await() } finally { timer.cancel() }
             }
-            return call to response
+            return@withContext call to response
         } catch (e: Throwable) {
             currentCoroutineContext().ensureActive()
+            forgetReach(ok, via)
             val error = mapped(e, call, request)
             if (timedOut.get() && error !is APIError.PinMismatch) throw APIError.Transport("timeout")
-            if (again && mayBeStale(e, error)) return null
+            if (again && mayBeStale(e, error)) {
+                via.connectionPool.evictAll()
+                return@withContext null
+            }
             throw error
         }
     }
@@ -255,10 +362,8 @@ class PinnedSessionTransport(val fingerprint: String) : HTTPTransport {
     override suspend fun stream(request: HTTPRequest): Pair<HTTPResponse, Flow<ByteArray>> {
         freshen()
         val ok = okRequest(request, request.body?.toRequestBody(null))
-        val (call, response) = streamHead(ok, request, again = ok.method == "GET" || ok.method == "HEAD") ?: run {
-            client.connectionPool.evictAll()
-            streamHead(ok, request, again = false)!!
-        }
+        val (call, response) = streamHead(ok, request, again = ok.method == "GET" || ok.method == "HEAD")
+            ?: streamHead(ok, request, again = false)!!
         val head = head(response)
         val body = flow {
             response.use { resp ->
@@ -286,28 +391,32 @@ class PinnedSessionTransport(val fingerprint: String) : HTTPTransport {
         return head to body
     }
 
-    private suspend fun exchange(request: HTTPRequest, body: RequestBody?): Pair<ByteArray, HTTPResponse> {
+    private suspend fun exchange(request: HTTPRequest, body: RequestBody?): Pair<ByteArray, HTTPResponse> = withContext(Dispatchers.IO) {
         freshen()
         val ok = okRequest(request, body)
         // A read may be asked once more on a new connection; a write never is (the Mac may have acted on it).
         var again = ok.method == "GET" || ok.method == "HEAD"
         while (true) {
-            val call = client.newCall(ok)
+            val via = clientFor(ok)
+            val call = via.newCall(ok)
             call.timeout().timeout(request.timeout.inWholeMilliseconds.coerceAtLeast(1), TimeUnit.MILLISECONDS)
             try {
                 val response = call.await()
-                return response.use { resp ->
-                    val bytes = cancelling(call) { withContext(Dispatchers.IO) { resp.body.bytes() } }
+                return@withContext response.use { resp ->
+                    val bytes = cancelling(call) { resp.body.bytes() }
                     bytes to head(resp)
                 }
             } catch (e: Throwable) {
                 currentCoroutineContext().ensureActive()
+                forgetReach(ok, via)
                 val error = mapped(e, call, request)
                 if (!again || !mayBeStale(e, error)) throw error
                 again = false
-                client.connectionPool.evictAll()
+                via.connectionPool.evictAll()
             }
         }
+        @Suppress("UNREACHABLE_CODE")
+        throw IllegalStateException("unreachable")
     }
 
     private fun okRequest(request: HTTPRequest, body: RequestBody?): Request {
@@ -351,7 +460,8 @@ private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont 
         }
 
         override fun onResponse(call: Call, response: Response) {
-            cont.resume(response) { _, value, _ -> value.close() }
+            // Nobody waits for it any more: closed, and not on the thread that found that out (it may be the main one).
+            cont.resume(response) { _, value, _ -> Dispatchers.IO.asExecutor().execute { try { value.close() } catch (_: Exception) { } } }
         }
     })
 }

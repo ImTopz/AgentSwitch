@@ -1,5 +1,7 @@
 package com.agentswitch.android
 
+import com.agentswitch.kit.connection.DirectRoute
+import com.agentswitch.android.platform.AndroidDirectRoute
 import com.agentswitch.android.platform.Follower
 import android.app.Application
 import android.os.Build
@@ -39,9 +41,13 @@ class AgentSwitchApp : Application() {
         }
     }
 
+    /** One for the process: it keeps the socket factory of the network under a VPN. */
+    private val direct by lazy { AndroidDirectRoute(this) }
+
     private inner class Services : PlatformServices {
         override fun discovery(): ServiceDiscovery = NsdDiscovery(this@AgentSwitchApp)
         override fun paths(): PathMonitoring = AndroidPathMonitor(this@AgentSwitchApp)
+        override fun directRoute(): DirectRoute = direct
 
         /** What the user called this phone (Settings › About phone), else its model. */
         override val deviceName: String

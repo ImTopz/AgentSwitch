@@ -25,6 +25,12 @@ file.
   The Mac's service closes a connection after 5 idle seconds, so an idle one is kept for 4, the kept ones are dropped
   after a longer silence (the phone slept, the app was frozen), and a read that fails on its connection is asked once
   more on a new one — never a write (`docs/app-v0.md` §5b, "Mac 关掉的连接").
+  All of it runs off the caller's thread: on Android the main thread may not touch the network, and closing a
+  response does.
+- `connection/DirectRoute.kt`: the way to the Mac's LAN address around a VPN on the phone. A proxy client (Clash and
+  its kind) takes every app's traffic and would send a connection for the Mac to a proxy that cannot reach it; where
+  the app names the network under the VPN (`platform/AndroidDirectRoute.kt`), the transport tries it first — a
+  connection and the pinned handshake — and uses it when the Mac answers there (`docs/app-v0.md` §5b, "手机上的 VPN").
 - `secrets/`: `crypto_box_seal` is libsodium's and nothing cryptographic is written here. The kit has the interface
   `BoxSealer`; the tests give it libsodium through lazysodium-java (and `CrossLanguageTests`, opt-in, has the Python
   gate open what Kotlin sealed).
