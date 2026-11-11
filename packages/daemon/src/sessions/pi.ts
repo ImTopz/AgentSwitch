@@ -7,7 +7,7 @@ import { basename } from "node:path";
 import { headLines, isTypedText, obj, str, tailLines, time, type Json } from "./jsonl.js";
 import { clipText, MESSAGE_CHARS, type SessionMessage } from "./types.js";
 
-export type PiFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly startedAt?: number; readonly model?: string };
+export type PiFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly named?: true; readonly lastText: string; readonly updatedAt: number; readonly startedAt?: number; readonly model?: string };
 
 function parts(line: Json): Json[] {
   const c = obj(line.message).content;
@@ -56,7 +56,7 @@ export function piFacts(path: string, mtime: number): PiFacts | null {
   const model = last.map((l) => (role(l) === "assistant" ? str(obj(l.message).model) : l.type === "model_change" ? str(l.modelId) : "")).find(Boolean);
   const started = time(header.timestamp);
   return {
-    id: str(header.id) || idOf(path), cwd, title, lastText, updatedAt: Math.max(time(stamped?.timestamp), mtime),
+    id: str(header.id) || idOf(path), cwd, title, ...(str(named?.name).trim() ? { named: true as const } : {}), lastText, updatedAt: Math.max(time(stamped?.timestamp), mtime),
     ...(started ? { startedAt: started } : {}), ...(model ? { model } : {}),
   };
 }

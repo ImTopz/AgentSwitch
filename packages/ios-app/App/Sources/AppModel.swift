@@ -84,6 +84,13 @@ final class AppModel {
     private(set) var threads: [AgentThread] = []
     private var cues = CueTracker()
     private var terminalCues = TerminalCueTracker()
+    private var terminalDone = TerminalDoneTracker()
+    /// The phone's own notifications (Live/Notifier.swift).
+    let notifier = Notifier()
+    /// The terminal whose page is on screen: nothing is notified of it while the app is in front.
+    var viewedTerminal: String? { didSet { if let viewedTerminal { notifier.clear(terminal: viewedTerminal) } } }
+    /// The app is in front (the scene is active).
+    var inFront = true
     var sheet: HomeSheet?
     /// The app opens on the terminals (2026-10-07, user: 手机默认进入 terminal 页吧): what the phone is used for most.
     var tab: MainTab = .terminals
@@ -216,6 +223,7 @@ final class AppModel {
         outgoing = nil
         cues = CueTracker()
         terminalCues = TerminalCueTracker()
+        terminalDone = TerminalDoneTracker()
         terminals.reset()
         browser.reset()
         targets = nil
@@ -426,6 +434,12 @@ final class AppModel {
         if !fresh.isEmpty {
             feedback.play(.needsYou, speaking: speaker.isSpeaking)
             if feedback.settings.voiceMode { speaker.say(fresh.map(\.spokenWait).joined(separator: "。"), key: "terminals:" + fresh.map(\.id).joined(separator: ",")) }
+        }
+        // A notification for each that newly waits and each whose turn ended — not for the one on screen in front.
+        let seen = inFront ? viewedTerminal : nil
+        for terminal in fresh where terminal.id != seen { notifier.post(terminal: terminal.id, title: "\(terminal.noticeName) · Needs You", body: terminal.noticeWait) }
+        for terminal in terminalDone.newlyDone(terminals.terminals) where terminal.id != seen {
+            notifier.post(terminal: terminal.id, title: "\(terminal.noticeName) · Done", body: "这一轮结束了。")
         }
         syncLive()
     }

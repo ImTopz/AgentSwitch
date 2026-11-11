@@ -114,4 +114,16 @@ final class TerminalAttentionTests: XCTestCase {
             LiveState(rows: [.init(id: "a", title: "x", step: "y", model: nil, startedAt: Date(), needsYou: true, kind: .terminal)], running: 0, waiting: 1)))
         XCTAssertEqual(again.rows.first?.kind, .terminal)
     }
+
+    func testATurnThatEndedIsToldOnceAndNotOnTheFirstLook() {
+        var tracker = TerminalDoneTracker()
+        XCTAssertEqual(tracker.newlyDone([terminal("a", .idle), terminal("b")]).map(\.id), [], "the first look sets the baseline")
+        XCTAssertEqual(tracker.newlyDone([terminal("a", .idle), terminal("b", .idle)]).map(\.id), ["b"])
+        XCTAssertEqual(tracker.newlyDone([terminal("a", .idle), terminal("b", .idle)]).map(\.id), [])
+        XCTAssertEqual(tracker.newlyDone([terminal("a"), terminal("b")]).map(\.id), [])
+        // One that stopped to ask is the other tracker's; one that ended is not a turn that ended.
+        XCTAssertEqual(tracker.newlyDone([terminal("a", .waiting, asks: ["p1"]), terminal("b", .exited)]).map(\.id), [])
+        XCTAssertEqual([terminal("a", name: "").noticeName, terminal("a").noticeName], ["Claude Code", "修复登录"])
+        XCTAssertEqual([terminal("a", .waiting, asks: ["p1"]).noticeWait, terminal("a", .waiting).noticeWait], ["Bash: npm test", "等你处理。"])
+    }
 }

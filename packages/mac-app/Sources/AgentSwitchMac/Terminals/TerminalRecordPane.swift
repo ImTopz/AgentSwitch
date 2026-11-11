@@ -622,48 +622,95 @@ private struct RecordDock: View {
                     HairRule(color: Look.line)
                 }
                 if !record.draftFiles.isEmpty { RecordDraftStrip(record: record).padding(.horizontal, 10).padding(.top, 9) }
-                ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
-                             takesFocusAtFirst: focused, label: "Reply", placeholder: placeholder(stops: stops, offered: record.suggestion ?? info?.suggestion, resting: info?.status == "idle"),
-                             replace: record.replace, onKey: { record.hintKey($0) }, onCaret: { record.typing($0, caret: $1) },
-                             onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
-                             onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
-                    .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
-                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 7)
-                HStack(spacing: 8) {
-                    MenuButton(entries: {
-                        [MenuEntry(title: "Files…", symbol: "folder", action: { record.chooseFiles() }),
-                         MenuEntry(title: "Paste Image", symbol: "doc.on.clipboard", key: "v", action: { record.pasteFromClipboard() })]
-                    }, above: true, help: "Attach") {
-                        LookGlyph(glyph: "+", symbol: "plus", size: 16).foregroundStyle(Look.ink2).frame(width: 26, height: 26).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(info?.status == "exited")
-                    session(info, record)
-                    Spacer(minLength: 8)
-                    if !beside || RecordDisplay.contextMeter(record.usage) == nil, let context = RecordDisplay.context(record.usage) {
-                        Text("Context \(context)").mono(Look.size(10.5, look)).foregroundStyle(Look.faint).lineLimit(1)
-                    }
-                    Button { if stops { record.interrupt() } else { record.send() } } label: {
-                        Group {
-                            if record.sending { BrailleSpinner() }
-                            else if look.isClassic { Image(systemName: stops ? "stop.fill" : "arrow.up").font(.system(size: stops ? 9 : 12, weight: .bold)) }
-                            else { Text(stops ? "■" : "↑").font(.system(size: stops ? 12 : 15, weight: .bold, design: .monospaced)) }
+                if look.isClassic {
+                    // One row (2026-11-11, user's picture of the box he wants): `+`, the reply, the key that sends.
+                    // How it asks, its model and its context stand under the box, not in it.
+                    HStack(alignment: .bottom, spacing: 6) {
+                        MenuButton(entries: {
+                            [MenuEntry(title: "Files…", symbol: "folder", action: { record.chooseFiles() }),
+                             MenuEntry(title: "Paste Image", symbol: "doc.on.clipboard", key: "v", action: { record.pasteFromClipboard() })]
+                        }, above: true, help: "Attach") {
+                            LookGlyph(glyph: "+", symbol: "plus", size: 16).foregroundStyle(Look.ink2).frame(width: 26, height: 26).contentShape(Rectangle())
                         }
-                        .foregroundStyle(record.canSend || stops ? (look.isClassic ? Color.white : Look.ground) : Look.faint)
-                        .frame(width: look.isClassic ? 26 : 30, height: 26)
-                        .background(sendGround(active: record.canSend || stops))
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .disabled(info?.status == "exited")
+                    ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
+                                 takesFocusAtFirst: focused, label: "Reply", placeholder: placeholder(stops: stops, offered: record.suggestion ?? info?.suggestion, resting: info?.status == "idle"),
+                                 replace: record.replace, onKey: { record.hintKey($0) }, onCaret: { record.typing($0, caret: $1) },
+                                 onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
+                                 onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
+                            .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
+                            .padding(.vertical, 4)
+                        Button { if stops { record.interrupt() } else { record.send() } } label: {
+                            Group {
+                                if record.sending { BrailleSpinner() }
+                                else if look.isClassic { Image(systemName: stops ? "stop.fill" : "arrow.up").font(.system(size: stops ? 9 : 12, weight: .bold)) }
+                                else { Text(stops ? "■" : "↑").font(.system(size: stops ? 12 : 15, weight: .bold, design: .monospaced)) }
+                            }
+                            .foregroundStyle(record.canSend || stops ? (look.isClassic ? Color.white : Look.ground) : Look.faint)
+                            .frame(width: look.isClassic ? 26 : 30, height: 26)
+                            .background(sendGround(active: record.canSend || stops))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!record.canSend && !stops)
+                        .help(stops ? "Stop esc" : "Send ↩ · New Line ⇧↩")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!record.canSend && !stops)
-                    .help(stops ? "Stop esc" : "Send ↩ · New Line ⇧↩")
+                    .padding(.horizontal, 9).padding(.vertical, 8)
+                } else {
+                    ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
+                                 takesFocusAtFirst: focused, label: "Reply", placeholder: placeholder(stops: stops, offered: record.suggestion ?? info?.suggestion, resting: info?.status == "idle"),
+                                 replace: record.replace, onKey: { record.hintKey($0) }, onCaret: { record.typing($0, caret: $1) },
+                                 onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
+                                 onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
+                        .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
+                        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 7)
+                    HStack(spacing: 8) {
+                        MenuButton(entries: {
+                            [MenuEntry(title: "Files…", symbol: "folder", action: { record.chooseFiles() }),
+                             MenuEntry(title: "Paste Image", symbol: "doc.on.clipboard", key: "v", action: { record.pasteFromClipboard() })]
+                        }, above: true, help: "Attach") {
+                            LookGlyph(glyph: "+", symbol: "plus", size: 16).foregroundStyle(Look.ink2).frame(width: 26, height: 26).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(info?.status == "exited")
+                        session(info, record)
+                        Spacer(minLength: 8)
+                        if !beside || RecordDisplay.contextMeter(record.usage) == nil, let context = RecordDisplay.context(record.usage) {
+                            Text("Context \(context)").mono(Look.size(10.5, look)).foregroundStyle(Look.faint).lineLimit(1)
+                        }
+                        Button { if stops { record.interrupt() } else { record.send() } } label: {
+                            Group {
+                                if record.sending { BrailleSpinner() }
+                                else if look.isClassic { Image(systemName: stops ? "stop.fill" : "arrow.up").font(.system(size: stops ? 9 : 12, weight: .bold)) }
+                                else { Text(stops ? "■" : "↑").font(.system(size: stops ? 12 : 15, weight: .bold, design: .monospaced)) }
+                            }
+                            .foregroundStyle(record.canSend || stops ? (look.isClassic ? Color.white : Look.ground) : Look.faint)
+                            .frame(width: look.isClassic ? 26 : 30, height: 26)
+                            .background(sendGround(active: record.canSend || stops))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!record.canSend && !stops)
+                        .help(stops ? "Stop esc" : "Send ↩ · New Line ⇧↩")
+                    }
+                    .padding(.leading, 9).padding(.trailing, 9).padding(.bottom, 9)
                 }
-                .padding(.leading, 9).padding(.trailing, 9).padding(.bottom, 9)
             }
             .grounded(Look.panel, radius: radius)
             .framed(Look.line, radius: radius)
             // A hairline and the faintest lift: a soft shadow all round before (2026-11-11).
             .shadow(color: .black.opacity(look.isClassic ? 0.05 : 0), radius: 3, y: 1)
+            if look.isClassic {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 8)
+                    session(info, record)
+                    if !beside || RecordDisplay.contextMeter(record.usage) == nil, let context = RecordDisplay.context(record.usage) {
+                        Text("Context \(context)").mono(Look.size(10.5, look)).foregroundStyle(Look.faint).lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.top, 2)
+            }
         }
         .frame(maxWidth: TerminalRecordPane.column, alignment: .leading)
         .padding(.horizontal, 24).padding(.top, Self.fade - 8).padding(.bottom, 14)

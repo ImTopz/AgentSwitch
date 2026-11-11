@@ -273,9 +273,10 @@ private struct FolderLine: View {
                 if look.isClassic {
                     // A solid mark, as a notification's count is (it was grey on grey): the green of a running
                     // terminal's dot, amber while one waits for you.
-                    Text(String(folder.live)).font(.system(size: 11, weight: .bold)).monospacedDigit()
+                    // Smaller since 2026-11-11 (user: 这个图标可以改小一点): 18 points across was the row's largest mark.
+                    Text(String(folder.live)).font(.system(size: 9.5, weight: .bold)).monospacedDigit()
                         .foregroundStyle(folder.waiting ? Color.white : Color.black.opacity(0.8))
-                        .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18)
+                        .padding(.horizontal, 4).frame(minWidth: 14, minHeight: 14)
                         .background(Capsule().fill(folder.waiting ? Color.waiting : Color.ok))
                 } else {
                     // Amber and blinking while one waits for you (it may be folded away).

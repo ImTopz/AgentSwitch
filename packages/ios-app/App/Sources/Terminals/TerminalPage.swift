@@ -321,6 +321,8 @@ struct TerminalPage: View {
             default: break
             }
         }
+        .onAppear { model.viewedTerminal = page.id; model.notifier.prepare() }
+        .onDisappear { if model.viewedTerminal == page.id { model.viewedTerminal = nil } }
         .onChange(of: page.removed) { if page.removed { TerminalViewMode.forget(page.id); model.terminals.remove(page.id); dismiss() } }
         .onChange(of: fontSize) { page.screen.setFontSize(CGFloat(fontSize)) }
         .onChange(of: reply) { ReplyDrafts.shared.text[opened.id] = reply.isEmpty ? nil : reply }

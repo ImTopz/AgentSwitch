@@ -82,6 +82,7 @@ struct AgentSwitchApp: App {
                 .environment(model)
                 .environment(lock)
                 .onOpenURL { open($0) }
+                .task { model.notifier.opened = { model.openTerminal($0) } }
                 #if DEBUG
                 // Simulator has no camera: `simctl launch <dev> com.agentswitch.ios -pairLink 'agentswitch://pair?p=…'`.
                 .task { if let link = UserDefaults.standard.string(forKey: "pairLink") { model.receivePairingLink(link) } }
@@ -93,9 +94,9 @@ struct AgentSwitchApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .background: lock.lockIfEnabled()
-            case .active: model.resume()
-            default: break
+            case .background: lock.lockIfEnabled(); model.inFront = false
+            case .active: model.inFront = true; model.resume()
+            default: model.inFront = false
             }
         }
     }

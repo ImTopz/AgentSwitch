@@ -6,7 +6,7 @@ import { headLines, isTypedText, obj, str, tailLines, time, unwrapPastes, type J
 import { currentFolder, movedFolder } from "./moved.js";
 import { clipText, MESSAGE_CHARS, type SessionMessage, type SessionMode } from "./types.js";
 
-export type ClaudeFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly branch?: string; readonly model?: string; readonly mode?: SessionMode };
+export type ClaudeFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly named?: true; readonly lastText: string; readonly updatedAt: number; readonly branch?: string; readonly model?: string; readonly mode?: SessionMode };
 
 /** Claude Code's `permissionMode` in the terminals' three words, never one that allows more than the session did:
  *  a mode narrower than `auto` (edits only, pre-approved only, plan) continues as asking each time. */
@@ -53,14 +53,15 @@ export function claudeFacts(path: string, mtime: number): ClaudeFacts | null {
   const last = [...tail].reverse();
   const relocated = movedFolder(began, str(last.find((l) => l.type === "relocated")?.relocatedCwd));
   const cwd = relocated !== began ? relocated : currentFolder(began, last.map((l) => str(l.cwd)).find(Boolean));
-  const title = str(tail.findLast((l) => l.type === "custom-title")?.customTitle) || (head.map(userText).find((t) => t !== null) ?? "");
+  const custom = str(tail.findLast((l) => l.type === "custom-title")?.customTitle);
+  const title = custom || (head.map(userText).find((t) => t !== null) ?? "");
   const lastText = last.map(assistantText).find((t) => t !== null) ?? "";
   const stamped = last.find((l) => l.timestamp);
   const branch = last.map((l) => str(l.gitBranch)).find(Boolean);
   const model = last.map((l) => str(obj(l.message).model)).find((m) => m && !m.startsWith("<"));
   const mode = claudeMode(last.map((l) => str(l.permissionMode)).find(Boolean) ?? "");
   return {
-    id: basename(path, ".jsonl"), cwd, title, lastText, updatedAt: Math.max(time(stamped?.timestamp), mtime),
+    id: basename(path, ".jsonl"), cwd, title, ...(custom ? { named: true as const } : {}), lastText, updatedAt: Math.max(time(stamped?.timestamp), mtime),
     ...(branch ? { branch } : {}), ...(model ? { model } : {}), ...(mode ? { mode } : {}),
   };
 }

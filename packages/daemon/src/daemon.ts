@@ -26,6 +26,7 @@ import { proxyPlace } from "./browser/identity.js";
 import { ClashIntegration } from "./clash/integration.js";
 import { ClashSource } from "./clash/source.js";
 import { ClashStore } from "./clash/store.js";
+import { SessionTitles } from "./sessions/titles.js";
 import { defaultCwdRules } from "./api/cwdPolicy.js";
 import { guardLocal } from "./api/localGuard.js";
 import { ensureLocalToken, LocalAuth } from "./api/localAuth.js";
@@ -455,6 +456,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     : undefined;
   // Terminals are used like any terminal: only the credentials at rest stay closed there (docs/terminal-v0.md §3).
   const termProt = terminalProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
+  // The titles agents give their sessions while they run in a terminal here, kept for the list of sessions.
+  const sessionTitles = new SessionTitles(cfg.home);
   // Terminals that outlive the service (docs/terminal-v0.md §10): each program on a holder of its own.
   const held = cfg.holdTerminals && (cfg.terminals || overrides.terminalLauncher) ? holding({ ringBytes: TERMINAL_RING_BYTES }) : null;
   if (cfg.holdTerminals && !held) console.error("terminals: no holder (native/build/pty-hold) — terminals end with the service");
@@ -464,6 +467,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
       deviceOf: (harness, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); return agent ? profiles.deviceOf(agent, profile ?? DEFAULT_PROFILE) : null; },
       onSession: (harness, sessionId, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); if (agent) profiles.noteSession(agent, sessionId, profile); },
+      onTitle: (harness, sessionId, title) => sessionTitles.note(harness, sessionId, title),
       launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
         // Through `current` where the runtime has one: a terminal that outlives this runtime runs the next one's hooks.
         node: stable(process.execPath), hookScript: stable(HOOK_SCRIPT), holding: held,
@@ -532,6 +536,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const sessions = cfg.watchSessions ? new SessionMonitor({
     ...sessionSources, ...(openCodeDelete ? { openCodeDelete } : {}),
     ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
+    agentTitle: (harness, id) => sessionTitles.get(harness, id),
   }) : undefined;
   const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
   const conversation = new AssistantLog(join(cfg.home, "assistant.db"));
@@ -580,7 +585,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const app = mountNodes(mountRemoteAdmin(new Hono().route("/", api), { store, remote, onRevoke: (id) => nodes.inboundGone(id), fileScopes }), { nodes, home: cfg.home });
   return { app, api, remote, nodes, engine, store, quota, targets, clash, terminals: terminalHost, leftovers, sessions: sessions ?? null, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
     stopBrowser: async () => { await profileBrowsers?.stop(); await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
-    close: () => { nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+    close: () => { sessionTitles.flush(); nodes.close(); thumbnails.close(); leftovers?.stop(); terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml

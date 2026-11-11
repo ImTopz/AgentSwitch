@@ -37,3 +37,30 @@ public struct TerminalCueTracker: Sendable {
         return now.filter { t in !before.contains(t.id) || t.permissions.contains { !seen.contains("\(t.id)/\($0.id)") } }
     }
 }
+
+/// Terminals whose turn newly ended (docs/app-v0.md §5 “通知”): at work at the last look, at rest now. The first look
+/// only sets the baseline; one that waits for you is the other tracker's.
+public struct TerminalDoneTracker: Sendable {
+    private var working: Set<String>?
+
+    public init() {}
+
+    public mutating func newlyDone(_ terminals: [TerminalInfo]) -> [TerminalInfo] {
+        let now = Set(terminals.filter { $0.status == .working }.map(\.id))
+        defer { working = now }
+        guard let before = working else { return [] }
+        return terminals.filter { before.contains($0.id) && $0.status == .idle && !$0.waitsForYou }
+    }
+}
+
+extension TerminalInfo {
+    /// What a notification calls it: its name, else its agent's.
+    public var noticeName: String { name.isEmpty ? ModelName.harness(harness) : name }
+
+    /// What a notification says it waits for: the question, the tool to approve, or nothing more.
+    public var noticeWait: String {
+        if let ask = permissions.first, let question = ask.questions.first { return question.question }
+        if let ask = permissions.first, !ask.summary.isEmpty { return ask.summary }
+        return "等你处理。"
+    }
+}

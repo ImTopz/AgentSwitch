@@ -32,6 +32,8 @@ export type SessionSources = {
   readonly ownIds?: () => ReadonlySet<string>;
   /** Folders decided at run time whose sessions are AgentSwitch's (the default work folder). */
   readonly ownFolders?: () => readonly string[];
+  /** The title a session's agent gave it while it ran in a terminal here (sessions/titles.ts); null: none known. */
+  readonly agentTitle?: (harness: SessionHarness, id: string) => string | null;
   /** Copies of the pictures a Codex record names only by their file's place (sessions/pictures.ts); absent: a
    *  picture is shown while its file is there, and no longer. */
   readonly pictures?: KeptPictures;
@@ -72,12 +74,22 @@ export class SessionMonitor {
       ...this.scan(jsonlFiles(this.sources.codexSessions, 3, now, this.scanFiles), "codex", now),
       ...(this.sources.piSessions ? this.scan(jsonlFiles(this.sources.piSessions, 1, now, this.scanFiles), "pi", now) : []),
     ];
-    const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", s, now));
+    // OpenCode's title is its own, kept in its own store: nothing of ours stands in for it.
+    const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", { ...s, named: true }, now));
     const own = this.sources.ownIds?.() ?? new Set<string>();
     return [...fromFiles, ...opencode]
       .filter((s): s is SessionSummary => s !== null && !this.isExcluded(s.cwd) && !own.has(s.id) && !!(s.title || s.lastText) && s.title !== RATE_LIMIT_PROBE_PROMPT)
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, limit);
+      .slice(0, limit)
+      .map((s) => this.titled(s));
+  }
+
+  /** `s` by the title its agent gave it, where the user gave it no name in the agent and one is known. Read each time
+   *  the list is: the title changes while the record's file does not. */
+  private titled(s: SessionSummary): SessionSummary {
+    if (s.named) return s;
+    const given = this.sources.agentTitle?.(s.harness, s.id);
+    return given ? { ...s, title: oneLine(given, TITLE_CHARS) } : s;
   }
 
   /** Where a listed session is kept: its file (Claude Code, Codex, pi) or OpenCode's database; null for one not listed. */
@@ -230,10 +242,10 @@ export class SessionMonitor {
     });
   }
 
-  private summary(harness: SessionHarness, f: { id: string; cwd: string; title: string; lastText: string; updatedAt: number; startedAt?: number; origin?: string; branch?: string; model?: string; mode?: SessionMode; forkedFrom?: string }, now: number): SessionSummary {
+  private summary(harness: SessionHarness, f: { id: string; cwd: string; title: string; named?: true; lastText: string; updatedAt: number; startedAt?: number; origin?: string; branch?: string; model?: string; mode?: SessionMode; forkedFrom?: string }, now: number): SessionSummary {
     return {
       // The folder as the disk spells it: a session recorded in `~/x/pi` is with the ones in `~/x/Pi`.
-      harness, id: f.id, cwd: keptDiskSpelling(f.cwd, now), title: oneLine(f.title, TITLE_CHARS), lastText: oneLine(f.lastText, TITLE_CHARS),
+      harness, id: f.id, cwd: keptDiskSpelling(f.cwd, now), title: oneLine(f.title, TITLE_CHARS), ...(f.named ? { named: true as const } : {}), lastText: oneLine(f.lastText, TITLE_CHARS),
       // Whole milliseconds: a file's mtime has a fraction, which a client reading an integer may refuse.
       updatedAt: Math.round(f.updatedAt),
       startedAt: Math.round(Math.min(f.startedAt || f.updatedAt, f.updatedAt)),

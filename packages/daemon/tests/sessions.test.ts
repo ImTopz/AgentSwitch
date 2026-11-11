@@ -1,7 +1,7 @@
 /** Watching the Mac's own coding sessions (docs/control-v0.md §3, 2026-09-27): Claude Code, Codex and OpenCode, read-only,
  *  newest first, the user's own only; the assistant sees folder, title and when, with anything credential-like masked. */
 
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,6 +12,7 @@ import type { ApiDeps } from "../src/api/shared.js";
 import { RATE_LIMIT_PROBE_PROMPT } from "../src/core/probes.js";
 import { folderLines, sessionsNear } from "../src/sessions/folders.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
+import { SessionTitles } from "../src/sessions/titles.js";
 import { SessionSearch } from "../src/sessions/search.js";
 import { maskSecrets, type SessionSummary } from "../src/sessions/types.js";
 import { claudeFacts, claudeMode } from "../src/sessions/claude.js";
@@ -75,6 +76,30 @@ describe("the Mac's coding sessions", () => {
     expect(list[0]).toMatchObject({ title: "修一下登录页 key=sk-ant-abcdefghijklmnop", lastText: "先看表单。", active: true, branch: "main", model: "claude-opus-5-5" });
     expect(list[1]).toMatchObject({ title: "跑一下测试", lastText: "测试全部通过。", active: false, origin: "desktop", model: "gpt-6-luna" });
     expect(list[2]).toMatchObject({ title: "整理笔记", lastText: "分好了，一共 12 个月。", model: "deepseek-flash" });
+  });
+
+  it("calls a session by the title its agent gave it in a terminal here, unless the user named it in the agent (2026-11-11)", () => {
+    const { sources, data } = fixture();
+    const titles = new SessionTitles(data, () => NOW);
+    const monitor = new SessionMonitor({ ...sources, agentTitle: (harness, id) => titles.get(harness, id) }, () => NOW);
+    titles.note("claude-code", "c1", "Fix the sign-in page's redirect");
+    titles.note("codex", "x1", "Run the tests");
+    titles.note("opencode", "o1", "not this");
+    const by = () => Object.fromEntries(monitor.list().map((s) => [s.id, s.title]));
+    expect(by()).toEqual({ c1: "Fix the sign-in page's redirect", x1: "Run the tests", o1: "整理笔记" });
+    // The agent changed it: the list has the new one though the record's file did not change.
+    titles.note("claude-code", "c1", "Sign-in redirect fixed");
+    expect(by().c1).toBe("Sign-in redirect fixed");
+    // Kept across a restart of the service, in a file that is the user's alone.
+    titles.flush();
+    expect(new SessionTitles(data).get("claude-code", "c1")).toBe("Sign-in redirect fixed");
+    expect(statSync(join(data, "sessions", "titles.json")).mode & 0o777).toBe(0o600);
+    // A name the user gave it in Claude Code itself comes first.
+    const file = join(sources.claudeProjects, "-Users-u-code-site", "c1.jsonl");
+    appendFileSync(file, line({ type: "custom-title", customTitle: "登录页", sessionId: "c1" }) + "\n");
+    expect(monitor.list().find((s) => s.id === "c1")).toMatchObject({ title: "登录页", named: true });
+    titles.forget("codex", "x1");
+    expect(by().x1).toBe("跑一下测试");
   });
 
   it("opens one session: prompts, replies and one line per tool call, sub-agents and injected context left out", () => {

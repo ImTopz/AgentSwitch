@@ -11,8 +11,11 @@ export type SessionSummary = {
   readonly harness: SessionHarness;
   readonly id: string;
   readonly cwd: string;
-  /** The session's title, else its first real user message (one line, clipped). */
+  /** The session's title: the name the user gave it in the agent, else the title its agent gave it while it ran in a
+   *  terminal here (sessions/titles.ts), else its first real user message (one line, clipped). */
   readonly title: string;
+  /** The title is a name the user gave it in the agent itself (Claude Code's `/rename`, pi's, OpenCode's own). */
+  readonly named?: true;
   /** The latest assistant text (one line, clipped). */
   readonly lastText: string;
   readonly updatedAt: number;
