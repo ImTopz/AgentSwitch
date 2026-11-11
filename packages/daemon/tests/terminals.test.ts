@@ -590,6 +590,23 @@ describe("terminal host", () => {
     expect(() => host.choose(info.id, 0, "gpt-6-sol (current)")).toThrow(/no longer shows/);
   });
 
+  it("tells the record's screens that the agent is trying to reach its service again, for as long as its screen says so (2026-11-11)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), choiceLookMs: 30 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    await until(() => host.get(info.id)!.title === "fake agent");
+    const said = () => host.get(info.id)!.notices.map((n) => `${n.id}: ${n.text}`);
+    host.write(info.id, "retry\r");
+    await until(() => said().length === 1);
+    expect(said()).toEqual(["trouble: API Error (Connection error.) · Retrying in 5 seconds… (attempt 2/10)"]);
+    // The count changed: the same notice, not another.
+    host.write(info.id, "retry3\r");
+    await until(() => said()[0]?.includes("attempt 3/10") === true);
+    expect(said().length).toBe(1);
+    host.write(info.id, "reached\r");
+    await until(() => said().length === 0);
+  });
+
   it("offers Claude Code's question about a folder — rows without numbers — and takes a row of it (2026-11-10)", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), choiceLookMs: 30 });
     closers.push(() => host.closeAll());

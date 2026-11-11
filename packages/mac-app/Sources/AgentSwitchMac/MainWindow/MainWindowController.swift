@@ -568,7 +568,9 @@ final class MainWindowController: NSObject {
     static func dress(_ window: NSWindow, for page: MainPage, system: NSAppearance? = nil, record: Bool = false) {
         // A terminal's record in the pane in focus (the simple view, docs/simple-view-v0.md §5.2): the system's light or
         // dark, the whole window with it — the list, the bars, the rail.
-        let follows = page == .terminals && record
+        // The Clash page likewise (2026-11-11, user: 这个页面应该换成和主题色一样的颜色): a page of settings, read as
+        // a record is.
+        let follows = (page == .terminals && record) || page == .clash
         window.appearance = page.alwaysDark && !follows ? NSAppearance(named: .darkAqua) : system
         window.backgroundColor = follows ? .dispatchGround : page.ground
     }

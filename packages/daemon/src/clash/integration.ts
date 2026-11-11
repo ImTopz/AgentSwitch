@@ -5,13 +5,13 @@
 
 import { createHash } from "node:crypto";
 import { stringify } from "yaml";
-import { buildConfig, chosen, CLASH_SERVICES, CLASH_TEMPLATES, DEFAULT_GROUP, defaultGroup, DIRECT_SET, directGroup, dnsSection, dnsText, groupNames, groupsIn, nodeSet, RULE_SETS, ruleSet, templateOn, running, SERVICE, templateRules, VERGE_UPDATE_HOURS, type ClashService, type ClashSettings, type ClashTemplate } from "./build.js";
+import { appliedConfig, buildConfig, chosen, CLASH_SERVICES, CLASH_TEMPLATES, DEFAULT_GROUP, defaultGroup, DIRECT_SET, directGroup, dnsSection, dnsText, groupNames, groupsIn, nodeSet, RULE_SETS, ruleSet, templateOn, running, SERVICE, templateRules, VERGE_UPDATE_HOURS, type ClashService, type ClashSettings, type ClashTemplate } from "./build.js";
 import { rulesFrom } from "./rules.js";
 import { observe, type CheckDeps, type Observed } from "./check.js";
 import { ClashController, type ClashStatus } from "./controller.js";
 import { ClashSourceError, type ClashSource, type SourceInfo } from "./source.js";
 import { cleanSettings, type ClashStore } from "./store.js";
-import { vergeOwnDns, vergeProfileLink, vergeProfileText, vergeProfiles, vergeSocket, type VergeProfile } from "./verge.js";
+import { vergeOwnDns, vergeProfileLink, vergeProfileText, vergeProfiles, vergeRuntime, vergeSocket, type VergeProfile } from "./verge.js";
 
 export type ClashServiceView = {
   /** Its two groups by the names they have in Clash. */
@@ -48,6 +48,9 @@ export type ClashView = {
   readonly install: string;
   /** When Clash Verge last fetched it; null: never. */
   readonly fetchedAt: number | null;
+  /** With `applyNow` on: why the core did not take the subscription made now, in its own words; null: it did, or
+   *  there was nothing to load. */
+  readonly applyProblem: string | null;
 };
 
 /** One line of the routing check (§7.9): a kind of traffic, the name tried for it, what it should do and what the
@@ -79,10 +82,15 @@ export type ClashOptions = {
 };
 
 const DELAY_MS = 5_000, HTTPS = 443;
+/** A text the core was given is not given again sooner than this (Clash Verge may have put its own copy back). */
+const APPLY_AGAIN_MS = 10 * 60_000;
 
 export class ClashIntegration {
   private updating: Promise<void> | null = null;
   /** What would be handed over now, kept until something it is made of changes. */
+  private applying: Promise<void> | null = null;
+  /** The text the core refused, and what it said: not offered again until the text is another. */
+  private refused: { readonly hash: string; readonly text: string } | null = null;
   private made: { readonly key: string; readonly config: Record<string, unknown>; readonly text: string; readonly hash: string } | null = null;
 
   constructor(private readonly o: ClashOptions) {}
@@ -109,10 +117,13 @@ export class ClashIntegration {
       if ("error" in read) throw new ClashRefused(read.error);
     }
     // An app from before §7.11 says nothing of `ownRules`: it stays as it was.
-    const keep = next && typeof next === "object" && !("ownRules" in next) ? { ownRules: this.o.store.settings().ownRules } : {};
-    this.o.store.save(cleanSettings({ ...(next as object), ...keep }));
+    // An app from before §7.11 says nothing of `ownRules`, one from before §7.12 nothing of `applyNow`: as they were.
+    const was = this.o.store.settings(), said = next && typeof next === "object" ? next as object : {};
+    const keep = { ...("ownRules" in said ? {} : { ownRules: was.ownRules }), ...("applyNow" in said ? {} : { applyNow: was.applyNow }) };
+    this.o.store.save(cleanSettings({ ...said, ...keep }));
     const status = await this.status();
     await this.push(status, false);
+    await this.apply();
     return this.shown(await this.status());
   }
 
@@ -140,6 +151,7 @@ export class ClashIntegration {
     }
     this.forgetNodes();
     await this.push(await this.status(), true);
+    await this.apply();
     return this.shown(await this.status());
   }
 
@@ -229,6 +241,8 @@ export class ClashIntegration {
   /** Once a minute: the subscription fetched again when its interval has passed. */
   async tick(): Promise<void> {
     if (this.o.source.due(this.o.store.settings().autoUpdateHours)) await this.refresh().catch(() => undefined);
+    // Clash Verge may have put the copy it holds back (it reloads on its own): the one made now is loaded again.
+    else await this.apply();
   }
 
   // ---- what Clash Verge and its core fetch
@@ -289,6 +303,7 @@ export class ClashIntegration {
       try {
         await this.o.source.refresh();
         await this.push(await this.status(), true);
+        await this.apply();
       } finally { this.updating = null; }
     })();
     await this.updating;
@@ -309,6 +324,35 @@ export class ClashIntegration {
     ]);
   }
 
+  /** With `applyNow` on (§7.12): a core that runs AgentSwitch's subscription, but not the one made now, is given the
+   *  one made now — the configuration Clash Verge made for it with this routing in place of its own. Clash Verge is
+   *  not told and none of its files is written: it fetches the same text within the hour and they agree again. A
+   *  core that does not run AgentSwitch's subscription is left alone; a text the core refuses is not offered twice. */
+  private async apply(): Promise<void> {
+    if (!this.o.store.settings().applyNow) { this.refused = null; return; }
+    this.applying ??= this.applyOnce().catch(() => undefined).finally(() => { this.applying = null; });
+    await this.applying;
+  }
+
+  private async applyOnce(): Promise<void> {
+    const controller = this.controller(), status = await this.status(), made = this.build();
+    if (!controller || !status || !made) return;
+    const seen = running({ enabled: this.enabled(), groups: groupsIn(made.config) }, status);
+    if (!seen.active) return;
+    const now = (this.o.now ?? Date.now)(), served = this.o.store.served(), applied = this.o.store.applied();
+    if (seen.current && (!served || served.hash === made.hash || applied?.hash === made.hash)) return;
+    if (this.refused?.hash === made.hash || (applied?.hash === made.hash && now - applied.at < APPLY_AGAIN_MS)) return;
+    const runtime = vergeRuntime(this.o.dir);
+    if (!runtime) return;
+    try {
+      await controller.load(stringify(appliedConfig(runtime, made.config, vergeOwnDns(this.o.dir)), { lineWidth: 0 }));
+      this.o.store.setApplied(made.hash, now);
+      this.refused = null;
+    } catch (err) {
+      this.refused = { hash: made.hash, text: coreSaid(err) };
+    }
+  }
+
   private shown(status: ClashStatus | null): ClashView {
     const profiles = vergeProfiles(this.o.dir);
     const settings = this.o.store.settings(), nodes = this.o.source.nodes(), info = this.o.source.info();
@@ -317,9 +361,9 @@ export class ClashIntegration {
     const base = this.o.base();
     // The groups of what would be handed over now: the core has to have each by its name. And what Clash Verge
     // last fetched has to be that very text — a part the core does not show (DNS) is told only so.
-    const made = this.build(), served = this.o.store.served();
+    const made = this.build(), served = this.o.store.served(), applied = settings.applyNow ? this.o.store.applied() : null;
     const seen = status ? running({ enabled, groups: made ? groupsIn(made.config) : [] }, status) : { active: false, current: false };
-    const state = { active: seen.active, current: seen.current && (!made || !served || served.hash === made.hash) };
+    const state = { active: seen.active, current: seen.current && (!made || !served || served.hash === made.hash || applied?.hash === made.hash) };
     const service = (s: ClashService): ClashServiceView => {
       const names = groupNames(document, s, settings);
       const live = !!status && state.active && SERVICE[s].set in status.nodeSets;
@@ -340,8 +384,16 @@ export class ClashIntegration {
       defaultGroup: info ? defaultGroup(document, settings) : null,
       dns: { on: settings.dns.on, custom: settings.dns.text !== null, overridden: vergeOwnDns(this.o.dir) },
       active: state.active, upToDate: state.current, install, fetchedAt: served?.at ?? null,
+      applyProblem: settings.applyNow && made && this.refused?.hash === made.hash ? this.refused.text : null,
     };
   }
+}
+
+/** What the core said of a configuration it would not take (`{"message":"rules[0] [MATCH,Nope] error: …"}`), short. */
+function coreSaid(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  const said = /"message"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text)?.[1]?.replace(/\\(.)/g, "$1");
+  return (said ?? text.replace(/^clash: \S+ \S+ → /, "")).slice(0, 200);
 }
 
 /** `upload=1; download=2; total=3; expire=4` as numbers: what is used of what, and when it ends (ms). */

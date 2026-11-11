@@ -15,6 +15,7 @@ import * as pty from "node-pty";
 import { attachHeld, endHeld, HoldError, startHeld, type HoldPlace, type Holding } from "./held.js";
 import { keySequence, replyBytes, type KeyContext } from "./keys.js";
 import { choicesOnScreen, type ScreenChoices } from "./screenChoices.js";
+import { troubleOnScreen } from "./screenTrouble.js";
 import { screenView } from "./screenView.js";
 
 export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
@@ -596,6 +597,8 @@ const COMMAND_STILL = 5;
  *  然后cli有回应 简略界面没反应). */
 export type ScreenNotice = { readonly id: string; readonly text: string; readonly at: number };
 const MAX_NOTICES = 8;
+/** The one notice that says the agent is trying to reach its service again (`troubleLooks`). */
+const TROUBLE_NOTICE = "trouble";
 const NOTICE_LOOKS_MS = [500, 1500];
 
 /** The lines `after` has that `before` had not, above the agent's input line: what a command printed. Each without
@@ -851,6 +854,8 @@ class Session {
   learning = false;
   /** The list its screen shows to choose from (`choiceLooks`). */
   choices: ScreenChoices | null = null;
+  /** What its screen says of trying to reach its service again (`troubleOnScreen`); "" when it says nothing. */
+  trouble = "";
   choiceTimer: NodeJS.Timeout | null = null;
   /** Replies sent and not yet in its record (`replied`), the oldest first; the timer that gives them up at rest. */
   sent: SentReply[] = [];
@@ -2008,12 +2013,24 @@ export class TerminalHost {
     s.choiceTimer = setTimeout(() => {
       s.choiceTimer = null;
       if (!this.sessions.has(s.id)) return;
+      this.troubleLooks(s);
       const now = this.choicesNow(s);
       if (JSON.stringify(now) === JSON.stringify(s.choices)) return;
       s.choices = now;
       s.emit({ type: "choices", choices: now });
     }, this.o.choiceLookMs);
     s.choiceTimer.unref();
+  }
+
+  /** Its screen is read for the line that says it is trying to reach its service again (`troubleOnScreen`): a notice
+   *  of its own for as long as the line stands, replaced as its count changes, gone with it. */
+  private troubleLooks(s: Session): void {
+    const text = s.status === "exited" ? "" : troubleOnScreen(this.screenAll(s)) ?? "";
+    if (text === s.trouble) return;
+    s.trouble = text;
+    const rest = s.notices.filter((n) => n.id !== TROUBLE_NOTICE);
+    s.notices = (text ? [...rest, { id: TROUBLE_NOTICE, text, at: this.o.now() }] : rest).slice(-MAX_NOTICES);
+    s.emit({ type: "notices", notices: [...s.notices] });
   }
 
   /** A screen takes row `pick` (from 0) of the list on the agent's screen, which must still read `label` there: the
@@ -2040,6 +2057,12 @@ export class TerminalHost {
     if (status === "idle" || status === "exited") { s.activity = null; s.compactFrom = null; this.progressed(s, null); this.writes(s, null); }
     // A program that ended asks nothing: the list its screen still shows (the folder question, answered "No") is gone.
     if (status === "exited" && s.choices) { s.choices = null; s.emit({ type: "choices", choices: null }); }
+    // At rest or ended it tries nothing again: the line may still stand on its screen, the notice does not.
+    if ((status === "idle" || status === "exited") && s.trouble) {
+      s.trouble = "";
+      s.notices = s.notices.filter((n) => n.id !== TROUBLE_NOTICE);
+      s.emit({ type: "notices", notices: [...s.notices] });
+    }
     s.emit({ type: "status", status });
     this.sentRests(s);
     this.suggests(s);

@@ -50,8 +50,9 @@ extension MainPage {
     /// The page's ground: what the window shows behind it, and below the refresh's edge while it is drawn in.
     var ground: NSColor {
         switch self {
-        case .dispatch: .dispatchGround
-        case .terminals, .browser, .clash: .black
+        // Clash too since 2026-11-11: the app's own ground, light or dark with the system (black whatever before).
+        case .dispatch, .clash: .dispatchGround
+        case .terminals, .browser: .black
         }
     }
 }

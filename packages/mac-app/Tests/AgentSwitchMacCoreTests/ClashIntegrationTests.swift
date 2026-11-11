@@ -48,6 +48,12 @@ final class ClashIntegrationTests: XCTestCase {
         XCTAssertTrue(none[0].contains("订阅") && none[1].contains("TUN"))
         XCTAssertEqual(try view(#""found":true,"running":true,"tun":true,"active":false,"upToDate":false"#).todo, ["在 Clash Verge 里添加并切换到 AgentSwitch 订阅。"])
         XCTAssertTrue(try view(#""found":true,"running":true,"tun":true,"active":true,"upToDate":false"#).todo[0].contains("更新一次"))
+        // With `applyNow` on and the core refusing what it was given: what the core said, not "wait for Clash Verge".
+        XCTAssertEqual(try view(#""found":true,"running":true,"tun":true,"active":true,"upToDate":false,"applyProblem":"proxy [Nope] not found""#).todo, ["内核没有接受新的订阅：proxy [Nope] not found"])
+        // A service from before §7.12 says nothing of either.
+        let old = try view(#""found":true,"running":true,"tun":true,"active":true,"upToDate":true"#)
+        XCTAssertEqual([old.settings.applyNow, old.applyProblem == nil], [false, true])
+        XCTAssertEqual([ClashText.nodes(42), ClashText.nodes(1)], ["42 Nodes", "1 Node"])
     }
 
     /// Only My Rules (§7.11): read when the service says it, off when it says nothing (a node from before), and always sent.

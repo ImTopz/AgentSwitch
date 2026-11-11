@@ -3,7 +3,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The main window's Clash page (docs/clash-v0.md §6; 2026-10-08, user: 可以不在设置里吗，弄成浏览器 terminal dispatch并列的):
-/// the form in a column of its own on the window's dark ground, looked at again only while the page is the one shown.
+/// a column of its own on the page's ground, looked at again only while the page is the one shown. Since 2026-11-11 the
+/// page is drawn in the app's own inks on its own ground, light or dark with the system — a system form on black
+/// before (user: 这个页面应该换成和主题色一样的颜色).
 struct ClashPage: View {
     let state: MainWindowState
     /// A made-up Clash for the design preview: shown as it is, the service never asked.
@@ -12,16 +14,14 @@ struct ClashPage: View {
     var body: some View {
         // On another node the page is that node's Clash (docs/mesh-v0.md §5.2; 2026-10-11, user: 我希望远程mac上我也能管理它的clash).
         ClashIntegrationView(shown: demo == nil && state.page == .clash && state.windowVisible, demo: demo, node: state.nodeId)
-            .scrollContentBackground(.hidden)
-            .frame(maxWidth: 680)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black)
+            .background(Look.ground)
     }
 }
 
 /// The page shows another node's Clash: its words say "that Mac", and what only that Mac can do is not offered.
 private struct ClashOnNodeKey: EnvironmentKey { static let defaultValue = false }
-private extension EnvironmentValues {
+extension EnvironmentValues {
     var clashOnNode: Bool {
         get { self[ClashOnNodeKey.self] }
         set { self[ClashOnNodeKey.self] = newValue }
@@ -29,7 +29,7 @@ private extension EnvironmentValues {
 }
 
 /// What the page's parts ask for; each is one call to the service, and what it answers is shown.
-private struct ClashActions {
+struct ClashActions {
     var save: (ClashSettings) -> Void = { _ in }
     var useLink: (String) -> Void = { _ in }
     var chooseFile: () -> Void = {}
@@ -91,26 +91,37 @@ struct ClashIntegrationView: View {
     private var view: ClashView? { loaded ?? demo }
 
     var body: some View {
-        Form {
-            if let view {
-                ClashStatusSection(view: view, error: error)
-                if view.running { ClashCheckSection(rows: checked ?? demoCheck, checking: checking, actions: actions) }
-                if view.found {
-                    // What is used day to day comes first; the subscription, once given, is at the foot.
-                    if view.source != nil {
-                        ForEach(ClashService.allCases, id: \.self) { service in
-                            ClashServiceSection(service: service, view: view, delays: delays[service] ?? demoDelays(service), testing: testing.contains(service), actions: actions)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let view {
+                    ClashStatusLines(view: view, error: error)
+                    if view.found {
+                        // The subscription first: where the nodes come from and how they are kept up to date (2026-11-11,
+                        // user: 代理链接更新相关的东西应该放在最上面; at the foot before).
+                        ClashGroup("Subscription") { ClashSubscriptionCard(view: view, fetching: fetching, actions: actions) }
+                        if view.source != nil {
+                            ClashGroup("Separate Proxies") {
+                                ForEach(ClashService.allCases, id: \.self) { service in
+                                    ClashServiceCard(service: service, view: view, delays: delays[service] ?? demoDelays(service), testing: testing.contains(service), actions: actions)
+                                }
+                            }
+                            ClashGroup("Rules") {
+                                ClashRulesCard(view: view, actions: actions)
+                                ClashDirectCard(view: view, actions: actions)
+                            }
                         }
-                        ClashRulesSection(view: view, actions: actions)
-                        ClashDirectSection(view: view, actions: actions)
                     }
-                    ClashSubscriptionSection(view: view, fetching: fetching, actions: actions)
+                    if view.running { ClashGroup("Routing Check") { ClashCheckCard(rows: checked ?? demoCheck, checking: checking, actions: actions) } }
+                } else {
+                    Text(error ?? "Reading…").font(.system(size: 13)).foregroundStyle(Look.ink2).padding(.top, 24)
                 }
-            } else {
-                Section { Text(error ?? "Reading…").foregroundStyle(.secondary) }
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
+            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .formStyle(.grouped)
+        .tint(Color.signal)
         .environment(\.clashOnNode, node != nil)
         .sheet(item: $editing) { item in
             ClashTextEditor(title: item.title, help: item.help, initial: item.text, custom: item.custom) { text in await saveEdited(item.template, text: text) }
@@ -256,346 +267,6 @@ struct ClashIntegrationView: View {
     private func said(_ error: Error) -> String { (error as? DaemonError)?.reason ?? error.localizedDescription }
 }
 
-// MARK: - Clash Verge
-
-private struct ClashStatusSection: View {
-    let view: ClashView
-    let error: String?
-    @Environment(\.clashOnNode) private var onNode
-
-    var body: some View {
-        Section {
-            ForEach(view.todo, id: \.self) { step in
-                Label(step, systemImage: "exclamationmark.circle").foregroundStyle(.orange)
-            }
-            if view.todo.isEmpty { Label("Clash Verge 正在使用 AgentSwitch 的订阅，TUN 已打开。", systemImage: "checkmark.circle").foregroundStyle(.green) }
-            if view.found, view.source != nil, !view.active {
-                if onNode {
-                    // The link that hands Clash Verge the subscription opens on the Mac Clash Verge runs on.
-                    Text("这一步在那台 Mac 上完成：在它的 AgentSwitch › Clash 页点 Add to Clash Verge…。").font(.callout).foregroundStyle(.secondary)
-                } else {
-                    Button("Add to Clash Verge…") { if let url = URL(string: view.install) { NSWorkspace.shared.open(url) } }
-                }
-            }
-            if let fetched = view.fetchedAt {
-                LabeledContent("Clash Verge Fetched") { Text(TimeText.moment(Date(timeIntervalSince1970: fetched / 1000))) }
-            }
-            if let error { Text(error).font(.callout).foregroundStyle(.red) }
-        } header: {
-            Text("Clash Verge")
-        } footer: {
-            Footer("AgentSwitch 把订阅原样拿来，加上 Claude 和 OpenAI 的分组与规则，\(onNode ? "在那台 Mac 上" : "在本机")提供给 Clash Verge（只有\(onNode ? "那台" : "这台") Mac 读得到）。不改 Clash Verge 的任何文件；不想用了，切回原来的订阅或删掉 AgentSwitch 这一个即可。换节点、调顺序、改直连都立刻生效；只有多出或少掉一组分组时要 Clash Verge 重新取一次，它每小时会自己来取——想更快，在 Clash Verge 里编辑 AgentSwitch 订阅，把更新间隔改成几分钟。")
-        }
-    }
-}
-
-// MARK: - the routing check
-
-/// Whether each kind of traffic goes where its rule sends it, seen on the running core (docs/clash-v0.md §7.9).
-private struct ClashCheckSection: View {
-    let rows: [ClashCheckRow]?
-    let checking: Bool
-    let actions: ClashActions
-    @Environment(\.clashOnNode) private var onNode
-
-    var body: some View {
-        Section {
-            ForEach(rows ?? []) { row in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: row.ok == true ? "checkmark.circle" : row.ok == false ? "xmark.circle" : "circle.dotted")
-                        .foregroundStyle(row.ok == true ? AnyShapeStyle(.green) : row.ok == false ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(row.title)
-                            Text(row.host).foregroundStyle(.secondary)
-                            Spacer()
-                            if let seen = row.seen { Text(seen).monospacedDigit().foregroundStyle(.secondary) }
-                        }
-                        Text(row.route).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                        if let problem = row.problem { Text(problem).font(.callout).foregroundStyle(.red) }
-                    }
-                }
-            }
-            HStack {
-                Button(rows == nil ? "Check Routing" : "Check Again", action: actions.check).disabled(checking)
-                if checking { ProgressView().controlSize(.small) }
-            }
-        } header: {
-            Text("Routing Check")
-        } footer: {
-            Footer("从\(onNode ? "那台" : "这台") Mac 经 Clash 发几条普通的连接出去，再问内核每一条命中了哪条规则、从哪个分组的哪个节点出去；Claude 和 OpenAI 还会问对方看到的来源地址。打勾的是照规则走了，打叉的没有；灰点是这里没有要求（那一项没开），只是告诉你它现在怎么走。不改 Clash 的任何设置。")
-        }
-    }
-}
-
-// MARK: - the subscription
-
-private struct ClashSubscriptionSection: View {
-    let view: ClashView
-    let fetching: Bool
-    let actions: ClashActions
-    @Environment(\.clashOnNode) private var onNode
-    @State private var link = ""
-    @State private var removing = false
-
-    var body: some View {
-        Section {
-            if let source = view.source { kept(source) }
-            HStack {
-                TextField(view.source == nil ? "Subscription Link" : "Another Link", text: $link).onSubmit(use)
-                Button("Use", action: use).disabled(fetching || link.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            HStack {
-                Button("Choose File…", action: actions.chooseFile)
-                Menu("Import from Clash Verge") {
-                    ForEach(view.profiles) { profile in Button(profile.name) { actions.importFrom(profile.uid) } }
-                }
-                .disabled(view.profiles.isEmpty)
-                .fixedSize()
-                Spacer()
-                if fetching { ProgressView().controlSize(.small) }
-            }
-            .disabled(fetching)
-        } header: {
-            Text("Subscription")
-        } footer: {
-            Footer("底本：一条订阅链接、一个 Clash 的 yaml 文件，或者 Clash Verge 里现有的一个订阅（抄一份过来）。AgentSwitch 自己保存它并按间隔去取新的，里面有节点的地址和密码：只存在\(onNode ? "那台" : "这台") Mac 上 AgentSwitch 自己的目录里，只有你能读。")
-        }
-        .confirmationDialog("Remove the subscription from AgentSwitch?", isPresented: $removing) {
-            Button("Remove", role: .destructive, action: actions.remove)
-        } message: {
-            Text("Clash Verge 会继续用它上次取到的那一份，直到你在那里切走或删掉 AgentSwitch 订阅。")
-        }
-    }
-
-    @ViewBuilder private func kept(_ source: ClashSource) -> some View {
-        LabeledContent("Source") { Text(ClashText.origin(source)).lineLimit(1) }
-        LabeledContent("Nodes") { Text("\(source.nodes)").monospacedDigit() }
-        LabeledContent("Updated") { Text(TimeText.moment(Date(timeIntervalSince1970: source.updatedAt / 1000))) }
-        if let traffic = source.traffic { LabeledContent("Traffic") { Text(ClashText.traffic(traffic)).monospacedDigit() } }
-        if let error = source.error { Label("上次没有取到：\(error)。现在用的是之前那一份。", systemImage: "exclamationmark.circle").foregroundStyle(.orange) }
-        ForEach(source.providers.filter { $0.error != nil }, id: \.name) { set in
-            Label("节点集 \(set.name) 没有取到：\(set.error ?? "")。", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
-        }
-        if let group = view.defaultGroup, !view.settings.ownRules {
-            Toggle("Rename “\(group)” to Manual", isOn: Binding(get: { view.settings.renameDefault }, set: { on in
-                var next = view.settings
-                next.renameDefault = on
-                actions.save(next)
-            }))
-        }
-        Picker("Auto Update", selection: Binding(get: { view.settings.autoUpdateHours }, set: { hours in
-            var next = view.settings
-            next.autoUpdateHours = hours
-            actions.save(next)
-        })) {
-            ForEach(ClashSettings.updateHours, id: \.self) { hours in Text(ClashText.interval(hours: hours)).tag(hours) }
-        }
-        HStack {
-            Button("Update Now", action: actions.update).disabled(fetching)
-            Spacer()
-            Button("Remove…", role: .destructive) { removing = true }.disabled(fetching)
-        }
-    }
-
-    private func use() {
-        let text = link.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty, !fetching else { return }
-        link = ""
-        actions.useLink(text)
-    }
-}
-
-// MARK: - a service's nodes
-
-private struct ClashServiceSection: View {
-    let service: ClashService
-    let view: ClashView
-    let delays: [String: Int?]
-    let testing: Bool
-    let actions: ClashActions
-
-    private var nodes: [String] { view.settings[service].nodes }
-    private var state: ClashServiceState? { view.state(service) }
-    private var live: Bool { state?.live ?? false }
-
-    var body: some View {
-        Section {
-            if let state, state.live {
-                ClashChoiceRow(title: "Automatic", detail: state.autoNow.map { "→ \($0)" } ?? "", chosen: state.automatic) { actions.select(service, nil) }
-            }
-            ForEach(nodes, id: \.self) { node in
-                ClashNodeRow(node: node, gone: state?.missing.contains(node) ?? false, delay: ClashText.delay(delays[node]),
-                             chosen: live ? state?.now == node : nil, first: node == nodes.first, last: node == nodes.last,
-                             pick: { actions.select(service, node) }, move: { by in move(node, by: by) }, remove: { change { $0.removeAll { $0 == node } } })
-            }
-            .onMove { from, to in change { $0.move(fromOffsets: from, toOffset: to) } }
-            HStack {
-                Menu("Add Node…") {
-                    Button("Test All Nodes") { actions.test(service, true) }
-                    Divider()
-                    ForEach(view.nodes.filter { !nodes.contains($0) }, id: \.self) { node in
-                        Button(label(node)) { change { $0.append(node) } }
-                    }
-                }
-                .fixedSize()
-                Spacer()
-                if testing { ProgressView().controlSize(.small) }
-                Button("Test") { actions.test(service, false) }.disabled(testing || nodes.isEmpty || !view.running)
-            }
-        } header: {
-            Text("Separate Proxy for \(service.title)")
-        } footer: {
-            Footer(footer)
-        }
-    }
-
-    private var footer: String {
-        guard let state else { return "" }
-        if nodes.isEmpty { return "没有选节点：\(service.title) 的流量照订阅里原有的规则走。" }
-        // Chosen for another subscription, none of them in this one: as good as none chosen.
-        if nodes.allSatisfy(state.missing.contains) { return "选的节点在现在这个订阅里一个都没有（标着 Gone）：\(service.title) 的流量照订阅里原有的规则走。从 Add Node… 里重新选几个；用不着的点减号拿掉。" }
-        let groups = "Clash 里是两组：\(state.auto) 按从上到下的顺序用第一个连得上的节点；\(state.group) 决定 \(service.title) 的流量走哪里。"
-        return live ? groups + "点一行就改用那一个。" : groups + "Clash Verge 用上之后，可以在这里点选用哪一个。"
-    }
-
-    /// A node in the menu, with how long it took when every node was tried.
-    private func label(_ node: String) -> String {
-        let delay = ClashText.delay(delays[node])
-        return delay.isEmpty ? node : "\(node)    \(delay)"
-    }
-
-    private func move(_ node: String, by: Int) {
-        change { list in
-            guard let i = list.firstIndex(of: node), list.indices.contains(i + by) else { return }
-            list.swapAt(i, i + by)
-        }
-    }
-
-    private func change(_ edit: (inout [String]) -> Void) {
-        var next = view.settings
-        edit(&next[service].nodes)
-        if next != view.settings { actions.save(next) }
-    }
-}
-
-/// `Automatic`, the first row of a service whose groups the core has.
-private struct ClashChoiceRow: View {
-    let title: String
-    let detail: String
-    let chosen: Bool
-    let pick: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ClashRadio(chosen: chosen, action: pick)
-            Text(title)
-            Spacer()
-            Text(detail).foregroundStyle(.secondary).lineLimit(1)
-        }
-    }
-}
-
-/// A chosen node: where it stands (moved by dragging or by its arrows), how long it took, whether the group uses it.
-private struct ClashNodeRow: View {
-    let node: String
-    let gone: Bool
-    let delay: String
-    /// nil: the core does not have this service's groups, so nothing can be picked yet.
-    let chosen: Bool?
-    let first: Bool
-    let last: Bool
-    let pick: () -> Void
-    let move: (Int) -> Void
-    let remove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if let chosen { ClashRadio(chosen: chosen, action: pick) }
-            Text(node).lineLimit(1)
-            if gone { Text("Gone").font(.callout).foregroundStyle(.orange).help("订阅里已经没有这个节点。") }
-            Spacer()
-            Text(delay).monospacedDigit().foregroundStyle(delay == "Timeout" ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-            Button { move(-1) } label: { Image(systemName: "chevron.up") }.disabled(first).help("Move Up")
-            Button { move(1) } label: { Image(systemName: "chevron.down") }.disabled(last).help("Move Down")
-            Button(action: remove) { Image(systemName: "minus.circle") }.help("Remove")
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
-    }
-}
-
-private struct ClashRadio: View {
-    let chosen: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: chosen ? "largecircle.fill.circle" : "circle").foregroundStyle(chosen ? Color.accentColor : Color.secondary)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - the rule templates
-
-private struct ClashRulesSection: View {
-    let view: ClashView
-    let actions: ClashActions
-
-    var body: some View {
-        Section {
-            Toggle(isOn: Binding(get: { view.settings.ownRules }, set: { on in
-                var next = view.settings
-                next.ownRules = on
-                actions.save(next)
-            })) {
-                Text("Only My Rules")
-                Text(view.settings.ownRules ? "订阅的分组和规则都不用了，只留它的节点" : "订阅自己的分组和规则排在这些后面").font(.caption)
-            }
-            ForEach(ClashTemplate.allCases, id: \.self) { template in
-                // The domestic template is on while only these rules are: without it everything at home goes by Manual.
-                let held = template == .domestic && view.settings.ownRules
-                HStack {
-                    Toggle(isOn: Binding(get: { held || view.settings.templates[template].on }, set: { on in
-                        var next = view.settings
-                        next.templates[template].on = on
-                        actions.save(next)
-                    })) {
-                        Text(template.title)
-                        Text(detail(template)).monospacedDigit()
-                    }
-                    .disabled(held)
-                    Button("Edit…") { actions.edit(template) }
-                }
-            }
-            HStack {
-                Toggle(isOn: Binding(get: { view.settings.dns.on }, set: { on in
-                    var next = view.settings
-                    next.dns.on = on
-                    actions.save(next)
-                })) {
-                    Text("DNS")
-                    Text(view.dns.custom ? "Edited" : "Template")
-                }
-                Button("Edit…", action: actions.editDNS)
-            }
-            if view.dns.on, view.dns.overridden {
-                Label("Clash Verge 自己的“DNS 覆写”开着：内核用的是它那一份，这里的 DNS 不起作用。", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
-            }
-        } header: {
-            Text("Rules")
-        } footer: {
-            Footer("Only My Rules：交给 Clash 的那一份只留订阅的节点，它的分组和规则都不要；Claude、OpenAI 照这里选的走，国内直连（这时国内模版一定开着），其余走 Manual（手选，或者自动选最快的）。这一项改的是订阅正文，要 Clash Verge 重新取一次才生效。规则模版打开就把这一套规则加进 Clash，关掉就拿走，都立刻生效。Domestic & Local Direct：国内常用域名、微信这类国内应用、局域网，直接连出去。Block Ads & Trackers：拦截广告和统计的域名；它排在订阅自己的规则之后，前面已经有规则管的流量不受它影响。DNS：用这里的 DNS 设置替换订阅自带的那一段（国内域名用国内 DNS 解析，Claude 的域名只认境外 DNS 的结果）；这一项改的是订阅正文，要 Clash Verge 重新取一次才生效。")
-        }
-    }
-
-    private func detail(_ template: ClashTemplate) -> String {
-        guard let state = view.state(template) else { return "" }
-        return ClashText.rules(state.count) + (state.custom ? " · Edited" : "")
-    }
-}
-
 /// The sheet a template is edited in: a rule template's rules, a line each (docs/clash-v0.md §7.7), or the DNS
 /// template's text (§7.8). `save` answers with what the service says is wrong with it, or nil when it was kept — the
 /// sheet closes only then; `save(nil)` is the built-in one again.
@@ -646,47 +317,6 @@ struct ClashTextEditor: View {
             saving = false
             if problem == nil { dismiss() }
         }
-    }
-}
-
-// MARK: - direct
-
-private struct ClashDirectSection: View {
-    let view: ClashView
-    let actions: ClashActions
-    @State private var address = ""
-
-    var body: some View {
-        Section {
-            ForEach(view.settings.direct, id: \.self) { item in
-                HStack {
-                    Text(item).font(.system(.body, design: .monospaced))
-                    Spacer()
-                    Button { change { $0.removeAll { $0 == item } } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).foregroundStyle(.secondary)
-                }
-            }
-            HStack {
-                TextField("IP or Host", text: $address).onSubmit(add)
-                Button("Add", action: add).disabled(address.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        } header: {
-            Text("Go Direct")
-        } footer: {
-            Footer("这些地址不经任何节点，直接连出去。改动立刻生效。")
-        }
-    }
-
-    private func add() {
-        let item = address.trimmingCharacters(in: .whitespaces)
-        guard !item.isEmpty else { return }
-        address = ""
-        change { if !$0.contains(item) { $0.append(item) } }
-    }
-
-    private func change(_ edit: (inout [String]) -> Void) {
-        var next = view.settings
-        edit(&next.direct)
-        if next != view.settings { actions.save(next) }
     }
 }
 

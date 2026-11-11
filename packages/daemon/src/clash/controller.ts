@@ -24,7 +24,7 @@ export type ClashConnection = { readonly host: string; readonly port: number; /*
   readonly rule: string; readonly payload: string; readonly chains: readonly string[]; readonly started: number };
 
 const BUILT_IN = new Set(["Direct", "Reject", "RejectDrop", "Pass", "PassRule", "Compatible", "Dns"]);
-const TIMEOUT_MS = 5_000;
+const TIMEOUT_MS = 5_000, LOAD_TIMEOUT_MS = 20_000;
 
 export class ClashController {
   constructor(private readonly socket: string) {}
@@ -81,6 +81,14 @@ export class ClashController {
   /** One node set read again from where it comes from: the groups that use it have its nodes, in its order, at once. */
   async refreshNodeSet(name: string): Promise<void> {
     await this.send("PUT", `/providers/proxies/${encodeURIComponent(name)}`);
+  }
+
+  /** The core runs this configuration from now on (`PUT /configs` with the text itself, not forced: what did not
+   *  change — its ports, TUN — is left as it is, open connections stay). One it cannot read is refused and what runs
+   *  is untouched (seen 2026-11-11 on a core of its own: `400 … proxy [Nope] not found`, the groups as before); the
+   *  error says what it said. */
+  async load(text: string): Promise<void> {
+    await this.send("PUT", "/configs?force=false", { path: "", payload: text }, LOAD_TIMEOUT_MS);
   }
 
   /** How long `node` of the node set `set` takes to answer `url` through it, in ms; null: it did not in `timeoutMs`. */

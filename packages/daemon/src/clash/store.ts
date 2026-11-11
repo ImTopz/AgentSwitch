@@ -11,7 +11,8 @@ import { rulesFrom } from "./rules.js";
 
 const MAX_NODES = 32, MAX_DIRECT = 64;
 /** `served`: the subscription as Clash Verge last fetched it — its fingerprint and when. */
-type State = { settings: ClashSettings; token?: string; served?: { hash: string; at: number } };
+type State = { settings: ClashSettings; token?: string; served?: { hash: string; at: number };
+  /** The subscription AgentSwitch last loaded into the core itself (§7.12): its fingerprint and when. */ applied?: { hash: string; at: number } };
 const MAX_DNS = 64 * 1024;
 
 export class ClashStore {
@@ -35,6 +36,10 @@ export class ClashStore {
 
   setServed(hash: string, at: number): void { this.write({ ...this.read(), served: { hash, at } }); }
 
+  applied(): { readonly hash: string; readonly at: number } | null { return this.read().applied ?? null; }
+
+  setApplied(hash: string, at: number): void { this.write({ ...this.read(), applied: { hash, at } }); }
+
   save(next: ClashSettings): ClashSettings {
     const settings = cleanSettings(next);
     this.write({ ...this.read(), settings });
@@ -43,9 +48,10 @@ export class ClashStore {
 
   private read(): State {
     try {
-      const o = JSON.parse(readFileSync(this.file, "utf8")) as { settings?: unknown; token?: unknown; served?: { hash?: unknown; at?: unknown } };
-      const served = typeof o.served?.hash === "string" && typeof o.served.at === "number" ? { hash: o.served.hash, at: o.served.at } : null;
-      return { settings: cleanSettings(o.settings), ...(typeof o.token === "string" && /^[\w-]{16,64}$/.test(o.token) ? { token: o.token } : {}), ...(served ? { served } : {}) };
+      const o = JSON.parse(readFileSync(this.file, "utf8")) as { settings?: unknown; token?: unknown; served?: { hash?: unknown; at?: unknown }; applied?: { hash?: unknown; at?: unknown } };
+      const stamp = (v: { hash?: unknown; at?: unknown } | undefined) => (typeof v?.hash === "string" && typeof v.at === "number" ? { hash: v.hash, at: v.at } : null);
+      const served = stamp(o.served), applied = stamp(o.applied);
+      return { settings: cleanSettings(o.settings), ...(typeof o.token === "string" && /^[\w-]{16,64}$/.test(o.token) ? { token: o.token } : {}), ...(served ? { served } : {}), ...(applied ? { applied } : {}) };
     } catch { return { settings: EMPTY_SETTINGS }; }
   }
 
@@ -79,5 +85,5 @@ export function cleanSettings(raw: unknown): ClashSettings {
   const templates = (o.templates && typeof o.templates === "object" ? o.templates : {}) as Record<string, unknown>;
   return { claude: service(o.claude), openai: service(o.openai), direct: strings(o.direct, MAX_DIRECT, true), autoUpdateHours: hours,
     templates: Object.fromEntries(CLASH_TEMPLATES.map((name) => [name, template(templates[name])])) as ClashSettings["templates"], renameDefault: o.renameDefault === true,
-    dns: dns(o.dns), ownRules: o.ownRules === true };
+    dns: dns(o.dns), ownRules: o.ownRules === true, applyNow: o.applyNow === true };
 }

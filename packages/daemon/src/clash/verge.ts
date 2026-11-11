@@ -66,6 +66,15 @@ export function vergeSocket(dir: string = vergeDir(), uid: number = userInfo().u
   } catch { return null; }
 }
 
+/** The configuration Clash Verge made for its core (`clash-verge.yaml`), read; null when there is none to read. It
+ *  holds the nodes' addresses and passwords and the controller's secret: it stays in this process (§7.12). */
+export function vergeRuntime(dir: string = vergeDir()): Record<string, unknown> | null {
+  try {
+    const doc = parse(readFileSync(join(dir, "clash-verge.yaml"), "utf8")) as unknown;
+    return doc && typeof doc === "object" && !Array.isArray(doc) ? doc as Record<string, unknown> : null;
+  } catch { return null; }
+}
+
 function origin(url: string): string | null {
   try { const u = new URL(url); return `${u.protocol}//${u.host}`; } catch { return null; }
 }

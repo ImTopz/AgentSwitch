@@ -89,6 +89,10 @@ async function handle(line) {
   if (line === "menu") { menu = 0; drawMenu(); return; }
   // Claude Code's question about a folder it has not seen (2.1.299): rows without numbers, the mark on "No".
   if (line === "trust") { trust = 0; drawTrust(); return; }
+  // Its service not reached: it says it tries again, counts, then the line is gone (`retry`).
+  if (line === "retry") { process.stdout.write("\x1b[2J\x1b[H✻ Working…\r\n  ⎿  API Error (Connection error.) · Retrying in 5 seconds… (attempt 2/10)\r\n"); return; }
+  if (line === "retry3") { process.stdout.write("\x1b[2J\x1b[H✻ Working…\r\n  ⎿  API Error (Connection error.) · Retrying in 9 seconds… (attempt 3/10)\r\n"); return; }
+  if (line === "reached") { process.stdout.write("\x1b[2J\x1b[H✻ Working…\r\n"); return; }
   // Claude Code while it works: its line with a clock and the tokens so far, on a row it redraws (`working 1.3k`).
   if (line.startsWith("working ")) { process.stdout.write(`\r\x1b[2K✻ Pondering… (12s · ↓ ${line.slice(8)} tokens · thought for 2s)`); return; }
   // Claude Code while it compacts its context: its own line with a clock, on a row it redraws; gone when done.

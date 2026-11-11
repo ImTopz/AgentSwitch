@@ -2,7 +2,7 @@
  *  — a node set and two groups for each of Claude and OpenAI, its rules in front; what is found of Clash Verge; the
  *  core's controller over its socket; the addresses Clash Verge and its core fetch, held to their token. */
 
-import { mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import { parse } from "yaml";
 import { mountClash } from "../src/api/clash.js";
 import { LocalAuth } from "../src/api/localAuth.js";
 import type { ApiDeps } from "../src/api/shared.js";
-import { BUILT_IN, buildSubscription, defaultGroup, directGroup, directRule, dnsSection, dnsText, EMPTY_SETTINGS, groupNames, nodeSet, RULE_SETS, ruleSet, running, type ClashSettings } from "../src/clash/build.js";
+import { appliedConfig, BUILT_IN, buildSubscription, defaultGroup, directGroup, directRule, dnsSection, dnsText, EMPTY_SETTINGS, groupNames, nodeSet, RULE_SETS, ruleSet, running, type ClashSettings } from "../src/clash/build.js";
 import { looksUp, ruleLine, rulesFrom } from "../src/clash/rules.js";
 import { observe, parseTrace } from "../src/clash/check.js";
 import { ClashController } from "../src/clash/controller.js";
@@ -507,7 +507,8 @@ async function core(start: { nodeSets?: Record<string, string[]>; ruleSets?: str
   const calls: string[] = [];
   const state = { now: { Claude: "Claude自动选择", "Claude自动选择": "🇯🇵 日本家宽-02" } as Record<string, string>,
     nodeSets: start.nodeSets ?? { tgyun: NODES.map((n) => n.name), "as-claude": ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] },
-    ruleSets: start.ruleSets ?? [...RULE_SETS], groups: start.groups ?? ["OpenAI自动选择", "OpenAI", "Manual", "Auto"], connections: [] as unknown[], delays: { "🇯🇵 日本家宽-01": 392, "🇯🇵 日本家宽-02": 428 } as Record<string, number> };
+    ruleSets: start.ruleSets ?? [...RULE_SETS], groups: start.groups ?? ["OpenAI自动选择", "OpenAI", "Manual", "Auto"], connections: [] as unknown[],
+    /** What it says of a configuration it is given to load; null: it takes it, and has its groups from then on. */ refuse: null as string | null, loaded: [] as Record<string, any>[], delays: { "🇯🇵 日本家宽-01": 392, "🇯🇵 日本家宽-02": 428 } as Record<string, number> };
   const server: Server = createServer((req, res) => {
     let body = ""; req.on("data", (c) => (body += c));
     req.on("end", () => {
@@ -519,6 +520,14 @@ async function core(start: { nodeSets?: Record<string, string[]>; ruleSets?: str
         const group = url.slice("/proxies/".length), name = JSON.parse(body).name as string;
         if (!members(group).includes(name)) return send({ message: "Proxy does not exist" }, 400);
         state.now[group] = name; return send(null, 204);
+      }
+      if (req.method === "PUT" && url.startsWith("/configs")) {
+        calls[calls.length - 1] = `PUT ${url}`;   // its body is a whole configuration
+        if (state.refuse) return send({ message: state.refuse }, 400);
+        const given = parse(JSON.parse(body).payload) as Record<string, any>;
+        state.loaded.push(given);
+        state.groups = (given["proxy-groups"] as { name: string }[]).map((g) => g.name).filter((n) => !/^Claude/.test(n));
+        return send(null, 204);
       }
       if (req.method === "PUT") return send(null, 204);
       if (url === "/version") return send({ meta: true, version: "v1.19.31" });
@@ -639,7 +648,7 @@ describe("Clash Integration over HTTP", () => {
       let parsed: any = null; try { parsed = JSON.parse(text); } catch { /* yaml */ }
       return { status: res.status, text, json: parsed, headers: res.headers };
     };
-    return { call, clash, ...running, routes, proxyPorts, asked: upstream.asked, upstream: { set body(v: string) { body = v; } }, clock: { add(ms: number) { t += ms; } } };
+    return { call, clash, dir, ...running, routes, proxyPorts, asked: upstream.asked, upstream: { set body(v: string) { body = v; } }, clock: { add(ms: number) { t += ms; } } };
   }
   const chosen = { claude: { nodes: ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] }, openai: { nodes: [] }, direct: ["5.102.107.254"], autoUpdateHours: 6,
     templates: { domestic: { on: false, rules: null as string[] | null }, block: { on: false, rules: null as string[] | null } }, renameDefault: false,
@@ -926,6 +935,64 @@ describe("Clash Integration over HTTP", () => {
     const { ownRules: _, ...old } = on.json.settings;
     expect((await call("PUT", "/clash/settings", { ...old, direct: ["1.2.3.4"] })).json.settings).toMatchObject({ ownRules: true, direct: ["1.2.3.4"] });
     expect((await call("PUT", "/clash/settings", { ...old, ownRules: false })).json).toMatchObject({ settings: { ownRules: false }, templates: { domestic: { on: false } }, defaultGroup: "Proxy" });
+  });
+
+  const RUNTIME = `mixed-port: 7897\nsecret: verge-secret\ntun:\n  enable: true\n  stack: gvisor\ndns:\n  enable: true\n  nameserver: [9.9.9.9]\nproxies: []\nproxy-groups:\n- { name: Proxy, type: select, proxies: [DIRECT] }\nsub-rules: { old: [] }\nrules:\n- MATCH,Proxy\n`;
+
+  it("leaves a change of the subscription's text to Clash Verge unless asked to load it itself (§7.12)", async () => {
+    const { call, clash, calls, dir } = await served({ nodeSets: {}, groups: ["Proxy"] });
+    writeFileSync(join(dir, "clash-verge.yaml"), RUNTIME);
+    await clash.setSource({ yaml: PLAIN, name: "plain.yaml" });
+    const off = await call("PUT", "/clash/settings", { ...chosen, claude: { nodes: [] }, ownRules: true });
+    expect(off.json).toMatchObject({ settings: { applyNow: false }, upToDate: false, applyProblem: null });
+    expect(calls.filter((c) => c.startsWith("PUT /configs"))).toEqual([]);
+  });
+
+  it("loads the subscription made now into a core that runs an older one, as Clash Verge set the core up", async () => {
+    const { call, clash, calls, state, dir, clock } = await served({ nodeSets: {}, groups: ["Proxy"] });
+    writeFileSync(join(dir, "clash-verge.yaml"), RUNTIME);
+    await clash.setSource({ yaml: PLAIN, name: "plain.yaml" });
+    const on = await call("PUT", "/clash/settings", { ...chosen, claude: { nodes: [] }, ownRules: true, applyNow: true });
+    expect(on.json).toMatchObject({ settings: { applyNow: true }, upToDate: true, applyProblem: null });
+    expect(calls.filter((c) => c.startsWith("PUT /configs"))).toEqual(["PUT /configs?force=false"]);
+    const loaded = state.loaded[0]!;
+    // Clash Verge's own part as it was; the routing is the subscription's made now; what it no longer has is gone.
+    expect(loaded).toMatchObject({ "mixed-port": 7897, secret: "verge-secret", tun: { enable: true, stack: "gvisor" } });
+    expect([loaded["proxy-groups"].map((g: { name: string }) => g.name), loaded.rules.at(-1), "sub-rules" in loaded]).toEqual([["Manual", "自动选择"], "MATCH,Manual", false]);
+    expect(Object.keys(loaded["rule-providers"])).toEqual(expect.arrayContaining([...RULE_SETS]));
+    // Nothing of Clash Verge's was written.
+    expect(readFileSync(join(dir, "clash-verge.yaml"), "utf8")).toBe(RUNTIME);
+    // The same text is not loaded again while the core has it; an app from before §7.12 leaves the switch as it is.
+    const { applyNow: _, ...old } = on.json.settings;
+    expect((await call("PUT", "/clash/settings", { ...old, direct: ["1.2.3.4"] })).json.settings).toMatchObject({ applyNow: true });
+    await clash.tick();
+    expect(state.loaded.length).toBe(1);
+    // Clash Verge put its own copy back: not at once again, but after a while.
+    state.groups = ["Proxy"];
+    await clash.tick();
+    expect(state.loaded.length).toBe(1);
+    clock.add(11 * 60_000);
+    await clash.tick();
+    expect(state.loaded.length).toBe(2);
+  });
+
+  it("says what the core said of a subscription it would not load, and does not offer it again", async () => {
+    const { call, clash, calls, state, dir } = await served({ nodeSets: {}, groups: ["Proxy"] });
+    writeFileSync(join(dir, "clash-verge.yaml"), RUNTIME);
+    await clash.setSource({ yaml: PLAIN, name: "plain.yaml" });
+    state.refuse = "rules[0] [MATCH,Nope] error: proxy [Nope] not found";
+    const on = await call("PUT", "/clash/settings", { ...chosen, claude: { nodes: [] }, ownRules: true, applyNow: true });
+    expect(on.json).toMatchObject({ upToDate: false, applyProblem: "rules[0] [MATCH,Nope] error: proxy [Nope] not found" });
+    await clash.tick();
+    expect(calls.filter((c) => c.startsWith("PUT /configs")).length).toBe(1);
+  });
+
+  it("puts the subscription's DNS in what it loads unless Clash Verge has its own", () => {
+    const runtime = { "mixed-port": 7897, dns: { nameserver: ["9.9.9.9"] }, rules: ["MATCH,Proxy"], "sub-rules": { a: [] } };
+    const made = { dns: { nameserver: ["1.1.1.1"] }, proxies: [], "proxy-groups": [{ name: "Manual" }], rules: ["MATCH,Manual"], port: 1 };
+    expect(appliedConfig(runtime, made, false)).toEqual({ "mixed-port": 7897, dns: { nameserver: ["1.1.1.1"] }, proxies: [], "proxy-groups": [{ name: "Manual" }], rules: ["MATCH,Manual"] });
+    expect(appliedConfig(runtime, made, true).dns).toEqual({ nameserver: ["9.9.9.9"] });
+    expect(runtime.rules).toEqual(["MATCH,Proxy"]);
   });
 
   it("offers to call a subscription's default group Manual, which Clash Verge has to fetch", async () => {

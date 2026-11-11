@@ -112,12 +112,15 @@ public struct ClashSettings: Codable, Equatable, Sendable {
     /// What Clash Verge is handed keeps the subscription's nodes alone: AgentSwitch's groups and rules are all there is,
     /// and the domestic template is on while this is (docs/clash-v0.md §7.11).
     public var ownRules: Bool
+    /// A change to the subscription's text is loaded into the running core by AgentSwitch itself, without waiting for
+    /// Clash Verge to fetch it (docs/clash-v0.md §7.12).
+    public var applyNow: Bool
 
     /// The intervals offered (the service takes no other).
     public static let updateHours = [0, 1, 6, 12, 24]
 
     public init(claude: ClashServiceNodes = .init(), openai: ClashServiceNodes = .init(), direct: [String] = [], autoUpdateHours: Int = 24,
-                templates: ClashTemplates = .init(), renameDefault: Bool = false, dns: ClashDNSSetting = .init(), ownRules: Bool = false) {
+                templates: ClashTemplates = .init(), renameDefault: Bool = false, dns: ClashDNSSetting = .init(), ownRules: Bool = false, applyNow: Bool = false) {
         self.claude = claude
         self.openai = openai
         self.direct = direct
@@ -126,17 +129,20 @@ public struct ClashSettings: Codable, Equatable, Sendable {
         self.renameDefault = renameDefault
         self.dns = dns
         self.ownRules = ownRules
+        self.applyNow = applyNow
     }
 
-    private enum CodingKeys: String, CodingKey { case claude, openai, direct, autoUpdateHours, templates, renameDefault, dns, ownRules }
+    private enum CodingKeys: String, CodingKey { case claude, openai, direct, autoUpdateHours, templates, renameDefault, dns, ownRules, applyNow }
 
-    /// A service from before §7.11 (another node not yet updated) says nothing of `ownRules`: off.
+    /// A service from before §7.11 (another node not yet updated) says nothing of `ownRules`, one from before §7.12
+    /// nothing of `applyNow`: off.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(claude: try c.decode(ClashServiceNodes.self, forKey: .claude), openai: try c.decode(ClashServiceNodes.self, forKey: .openai),
                   direct: try c.decode([String].self, forKey: .direct), autoUpdateHours: try c.decode(Int.self, forKey: .autoUpdateHours),
                   templates: try c.decode(ClashTemplates.self, forKey: .templates), renameDefault: try c.decode(Bool.self, forKey: .renameDefault),
-                  dns: try c.decode(ClashDNSSetting.self, forKey: .dns), ownRules: try c.decodeIfPresent(Bool.self, forKey: .ownRules) ?? false)
+                  dns: try c.decode(ClashDNSSetting.self, forKey: .dns), ownRules: try c.decodeIfPresent(Bool.self, forKey: .ownRules) ?? false,
+                  applyNow: try c.decodeIfPresent(Bool.self, forKey: .applyNow) ?? false)
     }
 
     public subscript(service: ClashService) -> ClashServiceNodes {
@@ -296,6 +302,9 @@ public struct ClashView: Decodable, Equatable, Sendable {
     public let install: String
     /// When Clash Verge last fetched it (ms); nil: not since the service started.
     public let fetchedAt: Double?
+    /// With `applyNow` on: what the core said of the subscription it would not load; nil: it took it, or there was
+    /// nothing to load (and a service from before §7.12 says nothing).
+    public let applyProblem: String?
 
     public func state(_ service: ClashService) -> ClashServiceState? { services[service.rawValue] }
 
@@ -306,9 +315,12 @@ public struct ClashView: Decodable, Equatable, Sendable {
         guard found else { return ["这台 Mac 上没有找到 Clash Verge。"] }
         guard running else { return ["Clash Verge 没有在运行：打开它。"] }
         var steps: [String] = []
-        if source == nil { steps.append("先在下面给一个订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
+        if source == nil { steps.append("先给一个订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
         else if !active { steps.append("在 Clash Verge 里添加并切换到 AgentSwitch 订阅。") }
-        else if !upToDate { steps.append("订阅的正文变了（分组、规则集或 DNS）：在 Clash Verge 里更新一次 AgentSwitch 订阅，或者等它自己来取（每小时一次）。") }
+        else if !upToDate {
+            if let applyProblem { steps.append("内核没有接受新的订阅：\(applyProblem)") }
+            else { steps.append("订阅有改动，Clash Verge 还没有取到：在那里更新一次 AgentSwitch 订阅，或者等它每小时自己来取。") }
+        }
         if tun == false { steps.append("打开 Clash Verge 的 TUN 模式。") }
         return steps
     }
@@ -342,6 +354,9 @@ public enum ClashText {
 
     /// `1 h`, `24 h`; `Off` for never.
     public static func interval(hours: Int) -> String { hours == 0 ? "Off" : "\(hours) h" }
+
+    /// `42 Nodes`, `1 Node`.
+    public static func nodes(_ count: Int) -> String { count == 1 ? "1 Node" : "\(count) Nodes" }
 
     /// `169 Rules`, `1 Rule`.
     public static func rules(_ count: Int) -> String { count == 1 ? "1 Rule" : "\(count) Rules" }

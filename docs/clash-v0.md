@@ -380,6 +380,39 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 - 真跑：用户现在这份订阅（47 个节点、20 个分组、43 条规则、29 个规则集）加上用户现在的设置，打开后生成的是 `Claude | Claude自动选择 | OpenAI | OpenAI自动选择 | Manual(48) | 自动选择(47)` 和上面那七条规则；Clash Verge 自带的内核 `-t` 通过。
 - Mac：`Rules` 一栏最上面一行 `Only My Rules`，开着时 `Domestic & Local Direct` 显示开着、不能点。iPhone：`Rules` 一栏同样一行。演示页 `docs/design/implemented/phone-proxies.html` 加了这一行。
 
+### 7.12 不等 Clash Verge 来取：直接让内核载入（2026-11-11）
+
+用户：代理链接更新相关的东西应该放在最上面；然后还是不能帮clash 自动拉取更新吗？
+
+**先再查了一遍**（本机 Clash Verge 2.5.8 的程序文件）：对外的入口仍然只有 `/commands/visible`、`/commands/pac` 和导入链接 `install-config`；它的 `update_profile` 只有它自己的界面能调。所以“让 Clash Verge 现在去取”这件事从外面做不到，§7.3 的结论没变。
+
+**做法**：一个开关 `Apply Changes at Once`，在 `Subscription` 里，默认关。打开后，订阅的正文一变（机场换了节点、多出或少掉分组、`Only My Rules`、改名、DNS），AgentSwitch 就让内核直接载入现在这一份，不等 Clash Verge 每小时来取：
+
+- 载入的是“Clash Verge 给内核生成的那份配置（它目录里的 `clash-verge.yaml`，只读）”换上现在这份订阅的 `proxies`、`proxy-providers`、`proxy-groups`、`rule-providers`、`rules`、`sub-rules`；`dns:` 也换，除非 Clash Verge 自己的 DNS 覆写开着或现在这份订阅没有这一段。端口、控制接口、口令、TUN、模式这些都是 Clash Verge 的，原样不动。
+- 经控制接口 `PUT /configs?force=false`，正文直接放在请求里（`payload`），不写任何文件。不强制：没变的部分（端口、TUN）内核不动，已有的连接不断。
+- 只对已经在跑 AgentSwitch 订阅的内核做；没切过去的不碰。
+- Clash Verge 不知情，它存的那一份还是旧的。它自己重新加载时（用户在它那里改了设置）会把旧的放回去；AgentSwitch 每分钟看一次，发现内核又不是现在这一份就再载入，同一份正文十分钟内不重复载入。它每小时来取一次，取到后两边一致。
+- 内核不接受的正文不会生效，正在跑的配置原样不动；页面顶上写出内核的原话，同一份正文不再试第二次。
+
+**风险**（所以默认关）：这是在 Clash Verge 不知情的情况下换掉正在运行的配置。用户在 Clash Verge 里另加了全局的 `Merge` / `Script` 或这条订阅自己的扩展时，那些改动在载入的这一份里只保留了端口这类它自己的部分，分组和规则上的改动要等它下次来取才回来。
+
+**查实的**（2026-11-11，临时目录里另起的一份同版本内核，只开本机回环上的控制口，与用户的 Clash 无关，试完已删）：带 `payload` 的 `PUT /configs?force=false` 回 204，新分组立刻出现，手选的成员保留；规则指向不存在的分组时回 400 `proxy [Nope] not found`，分组与之前一样。
+
+**没做的验证**：在用户开着 TUN 的 Clash Verge 上真的载入一次；载入那一下连接断不断；Clash Verge 的界面在这之后显示得对不对。
+
+实现：`build.ts` 的 `appliedConfig`、`verge.ts` 的 `vergeRuntime`、`controller.ts` 的 `load`、`integration.ts` 的 `apply`；设置里的 `applyNow`（旧版应用不带这一项时保持原样）；`GET /clash` 多了 `applyProblem`。
+
+### 7.13 页面改版（2026-11-11）
+
+用户：这个页面应该换成和主题色一样的颜色；然后现在这里面每个板块分级不太明显，容易混淆；还有一堆这东西，没人会读；代理链接更新相关的东西应该放在最上面。
+
+- **颜色**：不再是纯黑底上的系统表单。页面用应用自己的底色与墨色（`Look`），随系统的深浅走，整个窗口连同顶栏、图标栏一起，和简略视图一样；开关、单选的强调色是应用的信号色。
+- **两级，不多**：一组一个独立的大标题（`Subscription`、`Separate Proxies`、`Rules`、`Routing Check`），下面是一张或几张卡片；一组里有几张卡片时，每张在顶上的一条色带里写自己是什么（`Claude`、`OpenAI`、`Go Direct`），色带右端是它现在的状态（在用哪个节点、`Not in Clash Yet`、`Follows the Subscription`）。
+- **顺序**：最上面是还要做什么（没有就是一行 `In Use · TUN On · mihomo v…`），然后 `Subscription`（来源、节点数与流量、`Updated` 与 `Update Now`、`Clash Verge Fetched`、`Auto Update`、`Apply Changes at Once`、改名、换一条链接或文件、`Remove…`），再是各家的节点、规则、路由检查。原来订阅在最下面。
+- **每块下面的说明段落全部拿掉**。留下的只有：开关自己的一行小字（`Only My Rules`、`Apply Changes at Once`）、状态不对时的一行琥珀色字、编辑框里的写法说明。
+- 列表拖动排序拿掉了（它只在系统表单里可用），每行的上下箭头照旧。
+- 实现：`ClashIntegrationView.swift`（取数与动作）、`ClashPageParts.swift`（各块）；`-designPreviewOnly clash` 多画一张浅色的 `main-clash-light`。iPhone 上的那一页没有动。
+
 ## 8. 分步
 
 1. （做了）第一版：§6 末尾。

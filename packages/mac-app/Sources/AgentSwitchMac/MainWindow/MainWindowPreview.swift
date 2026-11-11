@@ -89,6 +89,8 @@ enum MainWindowPreview {
                                             model: model, appearance: NSAppearance(named: .darkAqua), to: directory.appendingPathComponent("main-clash-rules.png"))
         // The same in a window tall enough for all of it.
         try await shot(model: model, page: .clash, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1000, height: 1560), to: directory.appendingPathComponent("main-clash-full.png"))
+        // And as it is with the system light.
+        try await shot(model: model, page: .clash, system: NSAppearance(named: .aqua), size: NSSize(width: 1000, height: 1560), to: directory.appendingPathComponent("main-clash-light.png"))
     }
 
     static func renderRail(model: AppModel, into directory: URL) async throws {

@@ -37,9 +37,12 @@ export type ClashSettings = {
    *  routing — its groups, rules and rule sets are left out; AgentSwitch's groups, its rule sets and `MATCH,Manual`
    *  are all there is. The domestic template is on while this is. */
   readonly ownRules: boolean;
+  /** A change to the subscription's text is loaded into the running core by AgentSwitch itself, without waiting for
+   *  Clash Verge to fetch it (§7.12). Off unless the user turns it on: it changes what runs behind Clash Verge's back. */
+  readonly applyNow: boolean;
 };
 export const EMPTY_SETTINGS: ClashSettings = { claude: { nodes: [] }, openai: { nodes: [] }, direct: [], autoUpdateHours: 24,
-  templates: { domestic: { on: false, rules: null }, block: { on: false, rules: null } }, renameDefault: false, dns: { on: false, text: null }, ownRules: false };
+  templates: { domestic: { on: false, rules: null }, block: { on: false, rules: null } }, renameDefault: false, dns: { on: false, text: null }, ownRules: false, applyNow: false };
 export const UPDATE_HOURS = [0, 1, 6, 12, 24] as const;
 export const BUILT_IN: Readonly<Record<ClashTemplate, readonly string[]>> = { domestic: DOMESTIC_TEMPLATE, block: BLOCK_TEMPLATE };
 
@@ -265,6 +268,20 @@ function unname(config: Record<string, unknown>, gone: ReadonlySet<string>): voi
     const n = record(node);
     if (typeof n["dialer-proxy"] === "string" && gone.has(n["dialer-proxy"])) delete n["dialer-proxy"];
   }
+}
+
+/** The parts of a configuration that are the subscription's routing: what Clash Verge takes from the subscription as
+ *  it is. Everything else of what the core runs — its ports, its controller, TUN, the mode — is Clash Verge's own. */
+const ROUTING = ["proxies", "proxy-providers", "proxy-groups", "rule-providers", "rules", "sub-rules"] as const;
+
+/** What the core is to run now (§7.12): the configuration Clash Verge made for it (`runtime`), with the routing of the
+ *  subscription made now (`made`) in place of the routing it has. `dns:` too, unless Clash Verge has its own DNS
+ *  settings on or the subscription made now has none. Neither is changed. */
+export function appliedConfig(runtime: Readonly<Record<string, unknown>>, made: Readonly<Record<string, unknown>>, vergeDns: boolean): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...runtime };
+  for (const key of ROUTING) { if (key in made) out[key] = made[key]; else delete out[key]; }
+  if (!vergeDns && "dns" in made) out.dns = made.dns;
+  return out;
 }
 
 export function buildSubscription(document: Record<string, unknown>, nodes: readonly SourceNode[], held: readonly string[], settings: ClashSettings, base: string, token: string): string {

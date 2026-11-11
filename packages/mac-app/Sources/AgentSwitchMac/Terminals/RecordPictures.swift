@@ -93,7 +93,10 @@ struct RecordPictures: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        // They wrap: in one row six of them asked for some 1000 points, and a pane narrower than that (two side by
+        // side) was laid out that wide — the message, the reply box and all ran under the next pane (2026-11-11, user:
+        // 这个分屏是什么bug).
+        FlowLayout(spacing: 6, lineSpacing: 6) {
             // A message with many pictures shows the first few (a record is for reading, not a gallery).
             ForEach(0..<min(count, 6), id: \.self) { n in
                 RecordPicture(source: source, item: item, step: step, n: n, height: height) { shown = Shown(n: n) }
