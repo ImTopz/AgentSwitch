@@ -130,6 +130,8 @@ final class TerminalsModel {
     var sheetChecked = false
     var sheetFolder = ""
     @ObservationIgnored var sheetDone: CheckedContinuation<TerminalSheet.Answer, Never>?
+    /// The folders the user shows or hides in the list (the `+` beside the search, a folder's `Hide Folder`).
+    var folders = SessionFolders()
     private(set) var notice: String?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     /// A row on its way to a pane, and where it would land.
@@ -235,7 +237,7 @@ final class TerminalsModel {
     var order: [String] { TerminalListRows.order(terminals) }
     func here(_ id: String) -> Bool { !detached.contains(id) }
 
-    var tree: [TerminalTree.Folder] { TerminalTree.build(terminals: terminals, sessions: sessions, git: gits) }
+    var tree: [TerminalTree.Folder] { TerminalTree.build(terminals: terminals, sessions: sessions, git: gits, also: folders.shown) }
 
     /// The agents the list's filter offers.
     var filterAgents: [String] { TerminalListFilter.agents(terminals: terminals, sessions: sessions, chosen: filter.agent) }
@@ -329,6 +331,8 @@ final class TerminalsModel {
     }
 
     func refreshSessions() async {
+        // A service from before the list of folders has none: nothing is said of any.
+        if let said = try? await client().sessionFolders(), said != folders { folders = said }
         // Nothing while the list is the one already here (the service says so without sending it).
         guard let listed = try? await client().sessions(unless: sessionsVersion) else { return }
         sessionsVersion = listed.version

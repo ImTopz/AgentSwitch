@@ -415,6 +415,18 @@ extension TerminalsModel {
         pickAnchor = session.recordID
     }
 
+    /// A folder is shown in the list with everything under it (`show`), hidden with everything under it (`hide`), or
+    /// nothing is said of it any more (`forget`); the list is read again.
+    func sessionFolder(_ action: String, _ folder: String) {
+        let c = client()
+        Task {
+            do {
+                folders = try await c.sessionFolder(action, folder)
+                await refreshSessions()
+            } catch { say((error as? DaemonError)?.reason ?? error.localizedDescription) }
+        }
+    }
+
     func deletePicked() { delete(pickedSessions) }
     func deleteAll(in cwd: String) { delete(ownSessions(in: cwd)) }
 

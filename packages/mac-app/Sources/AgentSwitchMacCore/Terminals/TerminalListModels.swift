@@ -440,3 +440,25 @@ extension DaemonClient {
         _ = try await call("DELETE", "/terminals/\(Self.segment(id))" + (deleteRecord ? "?transcript=1" : ""))
     }
 }
+
+/// The folders the user says the list of sessions shows, and the ones they say it hides (docs/terminal-v0.md §1 “名单”):
+/// a folder shown is listed with everything under it wherever it is — a temporary one too; one hidden is not.
+public struct SessionFolders: Decodable, Equatable, Sendable {
+    public let shown: [String]
+    public let hidden: [String]
+
+    public init(shown: [String] = [], hidden: [String] = []) {
+        self.shown = shown
+        self.hidden = hidden
+    }
+}
+
+extension DaemonClient {
+    public func sessionFolders() async throws -> SessionFolders { try decode(SessionFolders.self, try await call("GET", "/sessions/folders")) }
+
+    /// `action`: `show`, `hide`, or `forget` (nothing is said of the folder any more).
+    public func sessionFolder(_ action: String, _ folder: String) async throws -> SessionFolders {
+        let body = try JSONSerialization.data(withJSONObject: ["action": action, "folder": folder])
+        return try decode(SessionFolders.self, try await call("POST", "/sessions/folders", body: body))
+    }
+}

@@ -113,7 +113,87 @@ private struct SearchLine: View {
         .background(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0).fill(look.isClassic ? Look.ink.opacity(0.07) : Color.clear))
         .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0)
             .strokeBorder(look.isClassic ? (focused ? Color.signal.opacity(0.45) : Color.clear) : (focused ? Look.ink2 : Look.line), lineWidth: look.isClassic ? 2.5 : 1))
+        .padding(.trailing, 30)
+        .overlay(alignment: .trailing) { FoldersButton(model: model) }
         .padding(EdgeInsets(top: look.isClassic ? 10 : 8, leading: look.isClassic ? 8 : 10, bottom: look.isClassic ? 6 : 4, trailing: look.isClassic ? 8 : 10))
+    }
+}
+
+/// `+` beside the search (2026-11-11, user: 在搜索旁边 加一个加号，输入目录之后就可以展示在侧边栏并强行扫里面的session展示
+/// 出来): a folder to show in the list with everything under it — a temporary one too, which the list leaves out by
+/// itself — and the folders shown and hidden so far, each taken back with its `×`.
+private struct FoldersButton: View {
+    let model: TerminalsModel
+    @State private var open = false
+    @State private var hovering = false
+    @State private var path = ""
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            LookGlyph(glyph: "+", symbol: "plus", size: 13).foregroundStyle(hovering || open ? Look.ink : Look.ink2)
+                .frame(width: 24, height: look.isClassic ? 28 : 26)
+                .background(RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0).fill(hovering || open ? ListLook.selected : Color.clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Show a Folder")
+        .popover(isPresented: $open, arrowEdge: .bottom) { box }
+    }
+
+    private var box: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Show a Folder").mono(12, weight: .semibold).foregroundStyle(Look.ink)
+            HStack(spacing: 8) {
+                TextField("/tmp/demo or ~/Desktop/demo", text: $path)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12.5, design: .monospaced))
+                    .frame(width: 280)
+                    .onSubmit(show)
+                Button("Choose…", action: choose)
+                Button("Show", action: show).keyboardShortcut(.defaultAction).disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Text("这个目录和它下面各级目录里的会话都会列出来，临时目录也一样。").font(.system(size: 11.5)).foregroundStyle(Look.ink2)
+            list("Shown", model.folders.shown)
+            list("Hidden", model.folders.hidden)
+        }
+        .padding(14)
+        .frame(width: 460, alignment: .leading)
+    }
+
+    @ViewBuilder private func list(_ title: String, _ folders: [String]) -> some View {
+        if !folders.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                SectionLabel(title)
+                ForEach(folders, id: \.self) { folder in
+                    HStack(spacing: 6) {
+                        Text(TerminalTree.tilde(folder)).font(.system(size: 12, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Button { model.sessionFolder("forget", folder) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Look.ink2).frame(width: 18, height: 18).contentShape(Rectangle()) }
+                            .buttonStyle(.plain)
+                            .help(title == "Hidden" ? "Show Again" : "No Longer Show")
+                    }
+                }
+            }
+        }
+    }
+
+    private func show() {
+        let text = path.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        path = ""
+        model.sessionFolder("show", text)
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.showsHiddenFiles = true
+        panel.message = "A folder whose sessions the list shows"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.sessionFolder("show", url.path)
     }
 }
 
@@ -239,6 +319,8 @@ private struct FolderLine: View {
         .contextMenu {
             Button("New Terminal Here") { model.showCreate(folder: folder.cwd) }
             Button("Show in Files") { model.files?.show(folder: folder.cwd) }
+            // Out of the list with everything under it; nothing is deleted, and the `+` beside the search has it back.
+            Button("Hide Folder") { model.sessionFolder("hide", folder.cwd) }
             let own = model.ownSessions(in: folder.cwd).count
             if own > 0 {
                 Divider()

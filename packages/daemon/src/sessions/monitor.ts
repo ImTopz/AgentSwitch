@@ -3,6 +3,7 @@
  *  directory are left out (probes, tests, AgentSwitch's executors). Read-only, except `remove`: the user deleting a
  *  session's record (docs/terminal-v0.md §5). */
 
+import { canonicalFolder, folderNames, type ShownFolders } from "./shownFolders.js";
 import { keptDiskSpelling } from "../core/paths.js";
 import { RATE_LIMIT_PROBE_PROMPT } from "../core/probes.js";
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -39,6 +40,9 @@ export type SessionSources = {
    *  was on the list only while its terminal ran, and gone after a restart (2026-11-11, user: 我在agentswitch里在/tmp
    *  开的session为什么重新启动agentswitch之后就没了). */
   readonly ranHere?: (harness: SessionHarness, id: string) => boolean;
+  /** The folders the user says are shown, and the ones they say are hidden (sessions/shownFolders.ts): what they say
+   *  comes before what is left out by itself. */
+  readonly folders?: () => ShownFolders;
   /** Copies of the pictures a Codex record names only by their file's place (sessions/pictures.ts); absent: a
    *  picture is shown while its file is there, and no longer. */
   readonly pictures?: KeptPictures;
@@ -68,14 +72,30 @@ export class SessionMonitor {
   /** Where each listed Claude / Codex session lives, for opening one. */
   private readonly files = new Map<string, string>();
 
+  private readonly spelled = new Map<string, string>();
+
   constructor(private readonly sources: SessionSources, private readonly now: () => number = Date.now) {}
 
   /** The Mac's sessions, newest first: each agent's newest `SCAN_FILES` records of the last 90 days, less those left
    *  out (scratch folders, our own executors', untitled, probes); `limit` keeps the first so many. */
   list(limit = Infinity): SessionSummary[] {
     const now = this.now();
+    const said = this.sources.folders?.() ?? { shown: [], hidden: [] };
+    const within = (cwd: string, roots: readonly string[]): boolean => {
+      if (!roots.length || !cwd) return false;
+      const at = this.canon(cwd);
+      return roots.some((root) => at === root || at.startsWith(root === "/" ? "/" : `${root}/`));
+    };
+    const shown = said.shown.map((f) => this.canon(f)), hidden = said.hidden.map((f) => this.canon(f));
+    // Claude Code keeps a folder's records under the folder's name: a folder the user shows is read whole, beside the
+    // newest of everything else — an old session in it is not crowded out by the rest.
+    const shownKeys = said.shown.flatMap(folderNames).map(claudeKey);
+    const shownDir = (dir: string): boolean => shownKeys.some((key) => dir === key || dir.startsWith(`${key}-`));
+    const claude = jsonlFiles(this.sources.claudeProjects, 1, now, this.scanFiles, (dir) => this.isExcludedKey(dir) && !shownDir(dir), (id) => this.sources.ranHere?.("claude-code", id) ?? false);
+    const forced = shownKeys.length ? jsonlFiles(this.sources.claudeProjects, 1, now, SHOWN_FILES, (dir) => !shownDir(dir)) : [];
+    const have = new Set(claude.map((r) => r.path));
     const fromFiles = [
-      ...this.scan(jsonlFiles(this.sources.claudeProjects, 1, now, this.scanFiles, (dir) => this.isExcludedKey(dir), (id) => this.sources.ranHere?.("claude-code", id) ?? false), "claude-code", now),
+      ...this.scan([...claude, ...forced.filter((r) => !have.has(r.path))], "claude-code", now),
       ...this.scan(jsonlFiles(this.sources.codexSessions, 3, now, this.scanFiles), "codex", now),
       ...(this.sources.piSessions ? this.scan(jsonlFiles(this.sources.piSessions, 1, now, this.scanFiles), "pi", now) : []),
     ];
@@ -83,7 +103,7 @@ export class SessionMonitor {
     const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", { ...s, named: true }, now));
     const own = this.sources.ownIds?.() ?? new Set<string>();
     return [...fromFiles, ...opencode]
-      .filter((s): s is SessionSummary => s !== null && (!this.isExcluded(s.cwd) || (this.sources.ranHere?.(s.harness, s.id) ?? false)) && !own.has(s.id) && !!(s.title || s.lastText) && s.title !== RATE_LIMIT_PROBE_PROMPT)
+      .filter((s): s is SessionSummary => s !== null && !within(s.cwd, hidden) && (!this.isExcluded(s.cwd) || within(s.cwd, shown) || (this.sources.ranHere?.(s.harness, s.id) ?? false)) && !own.has(s.id) && !!(s.title || s.lastText) && s.title !== RATE_LIMIT_PROBE_PROMPT)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, limit)
       .map((s) => this.titled(s));
@@ -306,6 +326,16 @@ export class SessionMonitor {
     return { removed, failed };
   }
 
+  /** A folder's one spelling (`/tmp/x` is `/private/tmp/x`), remembered: the disk is asked once for each. */
+  private canon(cwd: string): string {
+    const known = this.spelled.get(cwd);
+    if (known !== undefined) return known;
+    if (this.spelled.size > 5000) this.spelled.clear();
+    const at = canonicalFolder(cwd);
+    this.spelled.set(cwd, at);
+    return at;
+  }
+
   /** The folder or anything under it; `/private/tmp/` and `/private/tmp` mean the same. */
   private isExcluded(cwd: string): boolean {
     return !cwd || this.excludedRoots().some((root) => cwd === root || cwd.startsWith(`${root}/`));
@@ -340,6 +370,9 @@ function safeDirs(dir: string, all = false): string[] {
     return [];
   }
 }
+
+/** Records read in the folders the user shows, beside the newest of the rest. */
+const SHOWN_FILES = 2000;
 
 function claudeKey(path: string): string {
   return path.replace(/[^A-Za-z0-9]/g, "-");

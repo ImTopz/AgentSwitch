@@ -35,7 +35,8 @@ public enum TerminalTree {
         public var allSessions: [SessionSummary] { sessions + children.flatMap(\.allSessions) }
     }
 
-    public static func build(terminals: [TerminalInfo], sessions: [SessionSummary], git: [String: FolderGit] = [:]) -> [Folder] {
+    /// `also`: folders that are listed though nothing is in them (the ones the user said to show).
+    public static func build(terminals: [TerminalInfo], sessions: [SessionSummary], git: [String: FolderGit] = [:], also: [String] = []) -> [Folder] {
         // A session a running terminal writes (or was forked from) is not listed again; an ended terminal no longer
         // holds its session, so it can be resumed from the list.
         // A new Codex terminal says its record's id only after its first turn: until then, a Codex record made in its
@@ -51,7 +52,7 @@ public enum TerminalTree {
         let listed = sessions.filter { !held.contains($0.sessionId) && !ownRecord($0) }
         let terminalsIn = Dictionary(grouping: terminals, by: \.cwd)
         let sessionsIn = Dictionary(grouping: listed, by: \.cwd)
-        let own = Set(terminalsIn.keys).union(sessionsIn.keys)
+        let own = Set(terminalsIn.keys).union(sessionsIn.keys).union(also)
 
         var direct: [String: Int] = [:]
         for cwd in own where cwd != "/" { direct[parentOf(cwd), default: 0] += 1 }

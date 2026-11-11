@@ -2,6 +2,7 @@
  *  phone as for the Mac. Absent when the daemon does not watch sessions (tests, AGENTSWITCH_SESSIONS=0). */
 
 import type { Hono } from "hono";
+import { z } from "zod";
 import type { SessionMonitor } from "../sessions/monitor.js";
 import type { SessionHarness } from "../sessions/types.js";
 import { MAX_RECORD_LIMIT, RECORD_LIMIT } from "../sessions/record.js";
@@ -10,7 +11,8 @@ import { SessionSearch } from "../sessions/search.js";
 import { join } from "node:path";
 import { remoteCaller } from "../core/caller.js";
 import { TerminalAudit } from "../terminals/audit.js";
-import { limitParam, versionedJson, type ApiDeps } from "./shared.js";
+import { limitParam, parseBody, versionedJson, type ApiDeps } from "./shared.js";
+import { typedFolder } from "../sessions/shownFolders.js";
 
 const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "codex", "opencode", "pi"]);
 /** Agents that keep no register of a running session and no writer lock (docs/terminal-v0.md §5): a session written in
@@ -44,6 +46,18 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
       return profile ? { ...s, profile } : s;
     });
   };
+  // The folders the user shows or hides in the list (sessions/shownFolders.ts). This Mac's screens only.
+  const folders = deps.sessionFolders;
+  if (folders) {
+    app.get("/sessions/folders", (c) => c.json(folders.get()));
+    app.post("/sessions/folders", async (c) => {
+      const body = await parseBody(c, z.object({ action: z.enum(["show", "hide", "forget"]), folder: z.string().min(1).max(1000) }));
+      if (!body.ok) return c.json({ error: body.error }, 400);
+      const folder = typedFolder(body.data.folder);
+      if (!folder) return c.json({ error: "请输入一个完整的目录路径，例如 /tmp/demo 或 ~/Desktop/demo。" }, 400);
+      return c.json(body.data.action === "show" ? folders.show(folder) : body.data.action === "hide" ? folders.hide(folder) : folders.forget(folder));
+    });
+  }
   app.get("/sessions", (c) => versionedJson(c, { sessions: withProfiles(monitor.list(c.req.query("limit") === undefined ? Infinity : limitParam(c, LIST_LIMIT, Infinity))) }));
   // What was said in them (docs/terminal-v0.md §1 搜索): the tree's search, for the words only the Mac has.
   const search = new SessionSearch(monitor);

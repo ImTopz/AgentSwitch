@@ -1,5 +1,6 @@
 /** Shared by every route module: dependencies, body parsing, error text. */
 
+import type { ShownFoldersStore } from "../sessions/shownFolders.js";
 import type { Assistant } from "../assistant/assistant.js";
 import type { Sealer } from "../secrets/sealer.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -60,6 +61,8 @@ export type ApiDeps = {
   readonly taskFolderRoot?: () => string;
   /** The Mac's coding sessions (docs/control-v0.md §3); absent = not watched. */
   readonly sessions?: SessionMonitor;
+  /** The folders the user shows or hides in the list of sessions (sessions/shownFolders.ts). */
+  readonly sessionFolders?: ShownFoldersStore;
   /** AgentSwitch's own terminals, the manual entry (docs/terminal-v0.md); absent = off. */
   readonly terminals?: Terminals;
   /** The shared browser (docs/browser-v0.md); absent = off. */
