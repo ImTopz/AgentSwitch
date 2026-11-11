@@ -34,6 +34,11 @@ export type SessionSources = {
   readonly ownFolders?: () => readonly string[];
   /** The title a session's agent gave it while it ran in a terminal here (sessions/titles.ts); null: none known. */
   readonly agentTitle?: (harness: SessionHarness, id: string) => string | null;
+  /** The session ran in a terminal the user started here: it is listed whatever its folder — a temporary one too.
+   *  Sessions in `/tmp` and the like are left out as probes' and executors'; one the user began there in AgentSwitch
+   *  was on the list only while its terminal ran, and gone after a restart (2026-11-11, user: 我在agentswitch里在/tmp
+   *  开的session为什么重新启动agentswitch之后就没了). */
+  readonly ranHere?: (harness: SessionHarness, id: string) => boolean;
   /** Copies of the pictures a Codex record names only by their file's place (sessions/pictures.ts); absent: a
    *  picture is shown while its file is there, and no longer. */
   readonly pictures?: KeptPictures;
@@ -70,7 +75,7 @@ export class SessionMonitor {
   list(limit = Infinity): SessionSummary[] {
     const now = this.now();
     const fromFiles = [
-      ...this.scan(jsonlFiles(this.sources.claudeProjects, 1, now, this.scanFiles, (dir) => this.isExcludedKey(dir)), "claude-code", now),
+      ...this.scan(jsonlFiles(this.sources.claudeProjects, 1, now, this.scanFiles, (dir) => this.isExcludedKey(dir), (id) => this.sources.ranHere?.("claude-code", id) ?? false), "claude-code", now),
       ...this.scan(jsonlFiles(this.sources.codexSessions, 3, now, this.scanFiles), "codex", now),
       ...(this.sources.piSessions ? this.scan(jsonlFiles(this.sources.piSessions, 1, now, this.scanFiles), "pi", now) : []),
     ];
@@ -78,7 +83,7 @@ export class SessionMonitor {
     const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", { ...s, named: true }, now));
     const own = this.sources.ownIds?.() ?? new Set<string>();
     return [...fromFiles, ...opencode]
-      .filter((s): s is SessionSummary => s !== null && !this.isExcluded(s.cwd) && !own.has(s.id) && !!(s.title || s.lastText) && s.title !== RATE_LIMIT_PROBE_PROMPT)
+      .filter((s): s is SessionSummary => s !== null && (!this.isExcluded(s.cwd) || (this.sources.ranHere?.(s.harness, s.id) ?? false)) && !own.has(s.id) && !!(s.title || s.lastText) && s.title !== RATE_LIMIT_PROBE_PROMPT)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, limit)
       .map((s) => this.titled(s));
@@ -342,21 +347,23 @@ function claudeKey(path: string): string {
 
 /** `*.jsonl` files `depth` directories below `root`, the newest `limit` modified within `MAX_AGE_MS`; top-level
  *  directories `skip` names are not entered. */
-function jsonlFiles(root: string, depth: number, now: number, limit: number, skip: (dir: string) => boolean = () => false): FileRef[] {
+/** `skip`: a folder right under `root` that is passed over — but for the records in it that `keep` names (by their
+ *  file's name without `.jsonl`). */
+function jsonlFiles(root: string, depth: number, now: number, limit: number, skip: (dir: string) => boolean = () => false, keep: (id: string) => boolean = () => false): FileRef[] {
   const found: FileRef[] = [];
-  const walk = (dir: string, left: number) => {
+  const walk = (dir: string, left: number, only: boolean) => {
     let names: string[];
     try { names = readdirSync(dir); } catch { return; }
     for (const name of names) {
       const path = join(dir, name);
-      if (left > 0) { if (dir !== root || !skip(name)) walk(path, left - 1); continue; }
-      if (!name.endsWith(".jsonl")) continue;
+      if (left > 0) { walk(path, left - 1, only || (dir === root && skip(name))); continue; }
+      if (!name.endsWith(".jsonl") || (only && !keep(name.slice(0, -6)))) continue;
       try {
         const st = statSync(path);
         if (st.isFile() && now - st.mtimeMs < MAX_AGE_MS) found.push({ path, mtime: st.mtimeMs, size: st.size, born: st.birthtimeMs || st.ctimeMs });
       } catch { /* gone meanwhile */ }
     }
   };
-  walk(root, depth);
+  walk(root, depth, false);
   return found.sort((a, b) => b.mtime - a.mtime).slice(0, limit);
 }

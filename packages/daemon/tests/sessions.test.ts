@@ -102,6 +102,24 @@ describe("the Mac's coding sessions", () => {
     expect(by().x1).toBe("跑一下测试");
   });
 
+  it("lists a session in a temporary folder that ran in a terminal here, and no other there (2026-11-11)", () => {
+    const { sources, data } = fixture();
+    const titles = new SessionTitles(data, () => NOW);
+    const monitor = new SessionMonitor({ ...sources, agentTitle: (h, id) => titles.get(h, id), ranHere: (h, id) => titles.ran(h, id) }, () => NOW);
+    const dir = join(sources.claudeProjects, "-tmp-probe");
+    writeFileSync(join(dir, "mine.jsonl"), line({ type: "user", cwd: "/tmp/probe", message: { role: "user", content: "在临时目录里试一下" }, timestamp: "2026-09-27T09:59:10Z" }) + "\n");
+    expect(monitor.list().map((s) => s.id)).not.toContain("mine");
+    titles.seen("claude-code", "mine");
+    const listed = monitor.list().filter((s) => s.cwd === "/tmp/probe");
+    expect(listed.map((s) => [s.id, s.title])).toEqual([["mine", "在临时目录里试一下"]]);
+    expect(monitor.find("claude-code", "mine")?.cwd).toBe("/tmp/probe");
+    // Kept across a restart; a title its agent gives it later is used as for any other.
+    titles.flush();
+    expect(new SessionTitles(data).ran("claude-code", "mine")).toBe(true);
+    titles.note("claude-code", "mine", "Try it in a temporary folder");
+    expect(monitor.find("claude-code", "mine")?.title).toBe("Try it in a temporary folder");
+  });
+
   it("opens one session: prompts, replies and one line per tool call, sub-agents and injected context left out", () => {
     const { sources } = fixture();
     const m = new SessionMonitor(sources, () => NOW);
