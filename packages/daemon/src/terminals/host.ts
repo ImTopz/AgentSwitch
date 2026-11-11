@@ -1402,7 +1402,9 @@ export class TerminalHost {
 
   /** The list its screen shows now to choose from, if any. */
   private choicesNow(s: Session): ScreenChoices | null {
-    return s.status === "exited" ? null : choicesOnScreen(this.screenAll(s), s.term.cols);
+    // A shell's screen is whatever runs in it, never a question of the terminal's own: a list read off it would hold
+    // back a reply to a terminal that has no session yet (docs/simple-view-v0.md §5.17) — and a shell never has one.
+    return s.status === "exited" || s.harness === SHELL ? null : choicesOnScreen(this.screenAll(s), s.term.cols);
   }
 
   /** A screen asks the Claude Code in terminal `id` to ask in another way (docs/simple-view-v0.md §5.4 “换模式”). It

@@ -232,12 +232,13 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
   };
 }
 
-/** The user's shell: the one their account names, else the environment's, else zsh (a Mac's own since 10.15). */
+/** The user's shell: the one their account names, else the environment's, else zsh (a Mac's own since 10.15) — and
+ *  where there is none (a Linux node), bash, then `sh`, which is everywhere. */
 export function userShell(env: Record<string, string | undefined>): string {
   let named: string | null = null;
   try { named = userInfo().shell; } catch { /* no such user (a container): the environment's */ }
-  for (const file of [named, env.SHELL]) if (file && isAbsolute(file) && existsSync(file)) return file;
-  return "/bin/zsh";
+  for (const file of [named, env.SHELL, "/bin/zsh", "/bin/bash"]) if (file && isAbsolute(file) && existsSync(file)) return file;
+  return "/bin/sh";
 }
 
 /** With a locale that reads UTF-8 where the environment names none (a service started outside a login session): a

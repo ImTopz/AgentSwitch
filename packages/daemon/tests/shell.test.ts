@@ -80,7 +80,7 @@ describe("a shell in the host", () => {
   it("runs what is typed, stays idle whatever it prints, and nothing speaks for it", async () => {
     let token = "";
     const real = launcher();
-    const host = new TerminalHost({ launcher: (req) => { token = req.hookToken; return real(req); }, idleAfterMs: 100 });
+    const host = new TerminalHost({ launcher: (req) => { token = req.hookToken; return real(req); }, idleAfterMs: 100, choiceLookMs: 30 });
     closers.push(() => host.closeAll());
     const cwd = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-shell-cwd-")));
     const info = await host.spawn({ harness: SHELL, cwd, cols: 80, rows: 20 });
@@ -98,6 +98,15 @@ describe("a shell in the host", () => {
     await expect(host.hook(info.id, token, { event: "UserPromptSubmit", payload: { session_id: "s1" } })).rejects.toThrow(/unknown terminal or hook token/);
     expect(() => host.profileOf(info.id, token)).toThrow(/unknown terminal or hook token/);
     expect(host.get(info.id)).toMatchObject({ status: "idle", agentSessionId: null });
+    // Nor is what it draws a question of its own (2026-11-10): rows, one of them marked, and how to choose under them —
+    // as Claude Code asks whether to trust a folder — are read on an agent's screen as a list to pick from, and hold
+    // back a reply to an agent that has no session yet (docs/simple-view-v0.md §5.17). A shell never has a session,
+    // and what runs in it draws what it likes: its screen is not read for one.
+    host.write(info.id, "printf '\\033[2J\\033[H Trust this folder?\\n\\n \\342\\235\\257 No, exit\\n   Yes, I trust this folder\\n\\n Enter to confirm \\302\\267 Esc to cancel\\n'; sleep 1\r");
+    await until(() => text(events).includes("❯ No, exit"));
+    await new Promise((r) => setTimeout(r, 250));
+    expect(events.filter((e) => e.type === "choices" && e.choices !== null)).toEqual([]);
+    expect(host.get(info.id)?.choices ?? null).toBeNull();
     host.write(info.id, "exit 3\r");
     await until(() => host.get(info.id)?.status === "exited");
     expect(host.get(info.id)?.exitCode).toBe(3);
