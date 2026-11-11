@@ -13,19 +13,19 @@ final class MainWindowTests: XCTestCase {
     // MARK: pages
 
     func testOpensOnThePageShownLastAndOnDispatchTheFirstTime() {
-        XCTAssertEqual(MainPage.restored(nil), .dispatch)
+        XCTAssertEqual(MainPage.restored(nil), .terminals)
         XCTAssertEqual(MainPage.restored("terminals"), .terminals)
         XCTAssertEqual(MainPage.restored("dispatch"), .dispatch)
         XCTAssertEqual(MainPage.restored("browser"), .browser)
-        XCTAssertEqual(MainPage.restored("tasks"), .dispatch, "a word it does not know")
+        XCTAssertEqual(MainPage.restored("tasks"), .terminals, "a word it does not know")
     }
 
     func testPageWords() {
-        XCTAssertEqual(MainPage.allCases.map(\.title), ["Dispatch", "Terminals", "Browser", "Clash"], "the rail's order")
+        XCTAssertEqual(MainPage.allCases.map(\.title), ["Terminals", "Dispatch", "Browser", "Clash"], "the rail's order")
     }
 
     func testTheRailSaysEachPageWithTheKeyThatGoesThere() {
-        XCTAssertEqual(MainPage.allCases.map(\.railHelp), ["Dispatch ⌘0", "Terminals ⌘1–9", "Browser ⌘⇧B", "Clash ⌘⇧K"])
+        XCTAssertEqual(MainPage.allCases.map(\.railHelp), ["Terminals ⌘1–9", "Dispatch ⌘0", "Browser ⌘⇧B", "Clash ⌘⇧K"])
         for page in MainPage.allCases {
             let key = page.railHelp.split(separator: " ").last.map(String.init) ?? ""
             let press: MainShortcut.Press? = switch key {
@@ -46,14 +46,14 @@ final class MainWindowTests: XCTestCase {
     }
 
     func testPagesCycleBothWays() {
-        XCTAssertEqual(MainPage.dispatch.next, .terminals)
-        XCTAssertEqual(MainPage.terminals.next, .browser)
+        XCTAssertEqual(MainPage.terminals.next, .dispatch)
+        XCTAssertEqual(MainPage.dispatch.next, .browser)
         XCTAssertEqual(MainPage.browser.next, .clash)
-        XCTAssertEqual(MainPage.clash.next, .dispatch)
-        XCTAssertEqual(MainPage.dispatch.previous, .clash)
+        XCTAssertEqual(MainPage.clash.next, .terminals)
+        XCTAssertEqual(MainPage.terminals.previous, .clash)
         XCTAssertEqual(MainPage.clash.previous, .browser)
-        XCTAssertEqual(MainPage.browser.previous, .terminals)
-        XCTAssertEqual(MainPage.terminals.previous, .dispatch)
+        XCTAssertEqual(MainPage.browser.previous, .dispatch)
+        XCTAssertEqual(MainPage.dispatch.previous, .terminals)
     }
 
     func testEveryPageIsDark() {

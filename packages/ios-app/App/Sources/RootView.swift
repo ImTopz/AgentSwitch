@@ -95,13 +95,14 @@ struct MainTabs: View {
         TabView(selection: $model.tab) {
             // The pixel look's tabs are the shaded pictures (docs/ui-v0.md §9: tones of the ink, no hue), whole for the
             // tab in use, fainter for the others.
-            HomeView()
-                .tabItem { Label { Text("Dispatch") } icon: { look.isClassic ? Image(uiImage: TabIcons.classicTasks) : Image(uiImage: TabIcons.shaded(.dispatch, on: model.tab == .tasks, dark: scheme == .dark)) } }
-                .tag(MainTab.tasks)
+            // Terminals first (2026-11-11, user: 应该把dispatch的图标放在终端后面): the app opens on it, and it is used more.
             TerminalsTab()
                 .tabItem { Label { Text("Terminals") } icon: { look.isClassic ? Image(systemName: "terminal") : Image(uiImage: TabIcons.shaded(.terminals, on: model.tab == .terminals, dark: scheme == .dark)) } }
                 .badge(model.terminals.waiting)
                 .tag(MainTab.terminals)
+            HomeView()
+                .tabItem { Label { Text("Dispatch") } icon: { look.isClassic ? Image(uiImage: TabIcons.classicTasks) : Image(uiImage: TabIcons.shaded(.dispatch, on: model.tab == .tasks, dark: scheme == .dark)) } }
+                .tag(MainTab.tasks)
             // The Mac's files (docs/files-v0.md §5): after the terminals, which are what its files are given to.
             FilesTab()
                 .tabItem { Label { Text("Files") } icon: { look.isClassic ? Image(systemName: "folder") : Image(uiImage: TabIcons.shaded(.folder, on: model.tab == .files, dark: scheme == .dark)) } }

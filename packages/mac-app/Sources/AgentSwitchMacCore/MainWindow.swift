@@ -8,7 +8,9 @@ import Foundation
 // shortcuts and the trouble word.
 
 public enum MainPage: String, CaseIterable, Sendable {
-    case dispatch, terminals, browser, clash
+    // Terminals first since 2026-11-11 (user: dispatch 的优先级现在比终端低，所以应该把dispatch的图标放在终端后面，默认
+    // 安装打开的都是终端): the rail's order, ⌃⇥'s, and the page a new install opens on.
+    case terminals, dispatch, browser, clash
 
     /// The page's name (the rail's, the menus').
     public var title: String {
@@ -54,9 +56,9 @@ public enum MainPage: String, CaseIterable, Sendable {
     /// Where the page shown last is kept (UserDefaults).
     public static let storeKey = "mainWindowPage"
 
-    /// The page the window opens on: the one shown last; Dispatch the first time.
+    /// The page the window opens on: the one shown last; Terminals the first time.
     public static func restored(_ stored: String?) -> MainPage {
-        stored.flatMap(MainPage.init(rawValue:)) ?? .dispatch
+        stored.flatMap(MainPage.init(rawValue:)) ?? .terminals
     }
 }
 

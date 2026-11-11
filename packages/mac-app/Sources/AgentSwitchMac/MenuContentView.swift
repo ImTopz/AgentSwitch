@@ -168,8 +168,8 @@ struct MenuContentView: View {
             // The Dock icon opens the main window (2026-09-30, user: dock 栏直接点图标就可以打开 terminal，就不用状态栏里的
             // open terminal 了; dispatch-v0 §1); without a Dock icon these are the way in, one per page.
             if !alwaysShowInDock {
-                MenuAction(title: "Open Dispatch", rows: PixelArt.railDispatch, enabled: model.daemonReady) { showMainWindow(.dispatch) }
                 MenuAction(title: "Open Terminals", rows: PixelArt.railTerminals, enabled: model.daemonReady) { showMainWindow(.terminals) }
+                MenuAction(title: "Open Dispatch", rows: PixelArt.railDispatch, enabled: model.daemonReady) { showMainWindow(.dispatch) }
             }
             // No `Open in Browser` (the web console in the system's browser): taken out 2026-10-07, user: open in brower
             // 删掉，把这个功能直接删掉.
