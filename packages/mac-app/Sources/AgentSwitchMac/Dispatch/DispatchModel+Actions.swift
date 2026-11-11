@@ -339,7 +339,8 @@ extension DispatchModel {
         return copies[key] == file.version ? .local : .remote
     }
 
-    /// Downloads into the app's caches, marked as a download (quarantine), and opens it as DispatchTaskFile.opening
+    /// Downloads into the Downloads folder (2026-11-11, user: 他们发的附件下载之后应该直接保存到downloads下), marked as a
+    /// download (quarantine), and opens it as DispatchTaskFile.opening
     /// decides: a document in its app; anything that could run only shown in Finder; a web page, SVG or XML as its
     /// source. The copy is downloaded again whenever the Mac lists the file in another version (size, time written).
     func open(_ file: DispatchTaskFile, taskId: String) async {
@@ -362,9 +363,9 @@ extension DispatchModel {
         guard panel.runModal() == .OK, let to = panel.url else { return }
         Task {
             do {
-                guard let url = try await fetched(file, taskId: taskId) else { return }
-                if FileManager.default.fileExists(atPath: to.path) { try FileManager.default.removeItem(at: to) }
-                try FileManager.default.copyItem(at: url, to: to)
+                // Straight to where you chose: no second copy in Downloads.
+                guard let service else { return }
+                try await service.downloadTaskFile(taskId: taskId, path: file.path, to: to)
                 try DispatchQuarantine.mark(to)
             } catch {
                 report(error)
@@ -372,26 +373,59 @@ extension DispatchModel {
         }
     }
 
-    /// The file's copy in the app's caches, downloaded unless the copy is of the version the Mac lists now; nil while
-    /// another fetch of it is on.
+    // MARK: every task's kept files (the Files page)
+
+    func refreshKept() async {
+        guard let service else { return }
+        do {
+            kept = try await service.keptFiles()
+            keptError = nil
+        } catch DaemonError.notSupported(_) {
+            keptError = DispatchKeptWords.unsupported
+        } catch {
+            if kept == nil { keptError = DispatchErrors.text(error) }
+        }
+    }
+
+    /// One task's kept files, or with nil everyone's; what was kept back is said in the banner.
+    func deleteKept(taskId: String?) async {
+        guard let service else { return }
+        do {
+            let removal = try await service.deleteKeptFiles(taskId: taskId)
+            if taskId == nil, let left = DispatchKeptWords.left(busy: removal.busy) { banner = left }
+            // The cards' own lists are of files that may be gone now.
+            for id in taskId.map({ [$0] }) ?? kept?.tasks.map(\.id) ?? [] {
+                if let files = try? await service.taskFiles(taskId: id) { filesChanged(files, for: id) }
+            }
+        } catch {
+            report(error)
+        }
+        await refreshKept()
+    }
+
+    /// The file's copy in Downloads, downloaded unless the copy made before is of the version the Mac lists now and
+    /// still there (a click on a file already here opens that copy, and makes no `name 2`); nil while another fetch of
+    /// it is on. A name taken in Downloads gets a number, as a browser's download does (FilesDownloads).
     private func fetched(_ file: DispatchTaskFile, taskId: String) async throws -> URL? {
         guard let service else { return nil }
         let key = Self.fileKey(taskId, file.path)
         guard !downloading.contains(key) else { return nil }
         downloading.insert(key)
         defer { downloading.remove(key) }
-        let url = try DispatchFileCache.url(taskId: taskId, path: file.path)
         // The file as the Mac has it now (a card's list may be from long ago); unknown, the copy is not trusted.
         let listed = try? await service.taskFiles(taskId: taskId)
         if let listed { filesChanged(listed, for: taskId) }
         let current = listed?.first { $0.path == file.path }
-        if current == nil || copies[key] != current?.version || !FileManager.default.fileExists(atPath: url.path) {
-            copies[key] = nil
-            try await service.downloadTaskFile(taskId: taskId, path: file.path, to: url)
-            // Whichever Mac it came from (DaemonClient marks its own downloads already).
-            try DispatchQuarantine.mark(url)
-            copies[key] = (current ?? file).version
-        }
+        if let current, copies[key] == current.version, let here = copyURLs[key], FileManager.default.fileExists(atPath: here.path) { return here }
+        copies[key] = nil
+        let folder = FilesDownloads.folder()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = FilesDownloads.free(in: folder, name: file.name)
+        try await service.downloadTaskFile(taskId: taskId, path: file.path, to: url)
+        // Whichever Mac it came from (DaemonClient marks its own downloads already).
+        try DispatchQuarantine.mark(url)
+        copies[key] = (current ?? file).version
+        copyURLs[key] = url
         return url
     }
 
@@ -416,18 +450,13 @@ extension DispatchModel {
     #endif
 }
 
-/// Downloads live in Caches/AgentSwitch/dispatch-files/<task>/<path>, emptied when the page first loads.
+/// Downloads lived in Caches/AgentSwitch/dispatch-files/<task>/<path> until 2026-11-11; they go to the Downloads
+/// folder now, and what is left of that cache is removed when the page first loads.
 enum DispatchFileCache {
     static func root() throws -> URL {
         try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("AgentSwitch", isDirectory: true)
             .appendingPathComponent("dispatch-files", isDirectory: true)
-    }
-
-    static func url(taskId: String, path: String) throws -> URL {
-        let url = DispatchTaskFile.cacheURL(root: try root(), taskId: taskId, path: path)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        return url
     }
 
     static func clear() {

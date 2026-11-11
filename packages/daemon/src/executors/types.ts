@@ -36,7 +36,10 @@ export type ExecutionInput = {
   readonly threadHome: string | null;
   /** This harness's last session in the thread (from a `session` thread event); the executor resumes it natively. */
   readonly resume: string | null;
-  /** Files the user uploaded, already under <cwd>/in/. Images may be passed natively where the harness supports it. */
+  /** Where this task's files for the user go (absolute; `$AGENTSWITCH_HOME/artifacts/<task>/out`, files/names.ts).
+   *  Outside the working directory: an executor whose sandbox stops at the cwd opens this folder too. */
+  readonly outDir?: string | null;
+  /** Files the user uploaded (absolute paths under the task's `in/`). Images may be passed natively where the harness supports it. */
   readonly attachments: readonly Attachment[];
   /** Task or router asked for a browser: attach the gated Playwright MCP. */
   readonly browser: boolean;

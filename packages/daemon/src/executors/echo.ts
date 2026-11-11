@@ -24,7 +24,7 @@ export type EchoDirective = {
   /** Reported as the harness session handle, so thread resume can be tested without a model. */
   readonly session?: string;
   readonly sideEffects?: { filesChanged?: number; commandsRun?: number };
-  /** Files to write under <cwd>/out/ (path → content), to exercise artifact collection. */
+  /** Files to hand to the user (path → content): into the task's folder for that, `<cwd>/out/` when there is none. */
   readonly out?: Record<string, string>;
   /** What it writes as it goes (docs/simple-view-v0.md §5.14): each a part's text so far, `writingMs` apart; then its
    *  text, which ends them. */
@@ -93,7 +93,7 @@ export function echoExecutor(harness: string): Executor & { readonly runs: Execu
       }
       const answered = await askOnce(input, d);
       if (answered) input.emit("text", { text: answered });
-      for (const [rel, content] of Object.entries(d.out ?? {})) { const p = join(input.cwd, OUT_DIR, rel); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, content); }
+      for (const [rel, content] of Object.entries(d.out ?? {})) { const p = join(input.outDir ?? join(input.cwd, OUT_DIR), rel); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, content); }
       const sideEffects = { ...NO_SIDE_EFFECTS, ...(d.sideEffects ?? {}) };
       const failed = failures.get(input.taskId) ?? 0;
       if (d.fail && (d.failTimes === undefined || failed < d.failTimes)) {

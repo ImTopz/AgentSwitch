@@ -48,11 +48,11 @@ export class Uploads {
 
   /** Move staged uploads into `dir` under names without spaces (a path typed into a terminal stays one word); every
    *  id must exist (checked before anything moves). The paths returned are absolute. */
-  moveToDir(ids: readonly string[], dir: string): Attachment[] {
+  moveToDir(ids: readonly string[], dir: string, dashes = true): Attachment[] {
     const found = ids.map((id) => ({ id, ...this.staged(id) }));
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return found.map(({ id, name, size }) => {
-      const target = freeName(dir, name.replace(/\s+/g, "-"));
+      const target = freeName(dir, dashes ? name.replace(/\s+/g, "-") : name);
       renameSync(join(this.dir, id, name), join(dir, target));
       rmSync(join(this.dir, id), { recursive: true, force: true });
       return { name: target, path: join(dir, target), size, type: contentType(target) };

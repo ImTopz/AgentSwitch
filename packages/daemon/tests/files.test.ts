@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { collectOut, listTree, resolveInside, sweepDir } from "../src/files/artifacts.js";
 import { ATTACH_DIR, contentType, isImage, OUT_DIR, safeName } from "../src/files/names.js";
-import { attachmentsNote } from "../src/files/notes.js";
+import { attachmentsNote, handOverNote } from "../src/files/notes.js";
+import { composePrompt } from "../src/executors/instructions.js";
 import { Uploads } from "../src/files/uploads.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "agentswitch-files-"));
@@ -107,6 +108,12 @@ describe("attachments note", () => {
     const note = attachmentsNote([{ name: "a.png", path: "in/a.png", size: 245760, type: "image/png" }, { name: "s.pdf", path: "in/s.pdf", size: 1200, type: "application/pdf" }]);
     expect(note).toContain("in/a.png (240 KB, image/png)");
     expect(note).toContain("in/s.pdf (1.2 KB, application/pdf)");
-    expect(note).toContain("./out/");
+    expect(note).toContain("paths relative to the working directory");
+    expect(note).not.toContain("out/");
+    expect(attachmentsNote([{ name: "a.png", path: "/data/artifacts/t1/in/a.png", size: 1, type: "image/png" }])).toContain("absolute paths, outside the working directory");
+    // Where the files for the user go is said apart, in every executor's prompt.
+    expect(handOverNote("/data/artifacts/t1/out")).toContain("\n/data/artifacts/t1/out\n");
+    expect(composePrompt({ brief: "do it", handoffNote: null, context: null, outDir: "/data/artifacts/t1/out" })).toContain("Files for the user:");
+    expect(composePrompt({ brief: "do it", handoffNote: null, context: null })).toBe("do it");
   });
 });

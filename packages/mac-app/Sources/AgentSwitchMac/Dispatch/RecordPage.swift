@@ -22,6 +22,15 @@ struct RecordPage: View {
     var body: some View {
         let items = model.record
         VStack(spacing: 0) {
+            // Every task's files together, and their removal (2026-11-11): always here, the page's one way there.
+            HStack {
+                Spacer()
+                Button { open(.files) } label: { BracketLabel(word: "Files") }
+                    .buttonStyle(BracketButtonStyle(size: 11.5))
+                    .help("All Files of Tasks")
+            }
+            .padding(.top, 8)
+            .dispatchColumn()
             TopicStrip(model: model, open: open)
             LooseApprovalsLine(approvals: DispatchFeed.looseApprovals(model.approvals, record: items), model: model, open: open)
             ScrollViewReader { scroller in

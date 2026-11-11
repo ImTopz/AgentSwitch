@@ -24,7 +24,9 @@ export type NewTask = {
   readonly ephemeral?: boolean;
   /** Follow-up: the router and executor see the parent task's text and result as context. */
   readonly parentId?: string;
-  /** Uploaded files already moved into <cwd>/in/. */
+  /** The task's id, when its files had to be placed before it was stored (the uploads go under it). */
+  readonly id?: string;
+  /** Uploaded files already moved into the task's `in/` (files/names.ts); their paths are absolute. */
   readonly attachments?: readonly Attachment[];
   /** Thread to run in; default: the parent's thread, else a new one. */
   readonly threadId?: string;

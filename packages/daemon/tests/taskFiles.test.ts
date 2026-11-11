@@ -1,7 +1,7 @@
 /** GET /tasks/:id/files[/*] serves a task's own in/ and out/ (or its artifacts), never the rest of a user-chosen cwd, never
  *  through a symlink or hard link, never from a cwd the rules refuse (security review 2026-09-24). */
 
-import { linkSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,6 +17,9 @@ function daemon(home = mkdtempSync(join(tmpdir(), "agentswitch-tf-"))) {
   const post = (body: unknown) => d.app.request("/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return { d, home, post };
 }
+
+/** A task from before 2026-11-11 has no folder of its own in the data directory: its files are in its working directory. */
+const asOlder = (home: string, id: string): void => rmSync(join(home, "artifacts", id), { recursive: true, force: true });
 
 /** A project with a secret next to in/ and out/, and links out of out/. */
 function project(daemonHome: string): { dir: string; outside: string } {
@@ -37,6 +40,42 @@ function project(daemonHome: string): { dir: string; outside: string } {
 }
 
 describe("task files", () => {
+  it("a task hands its files over in the data directory, and makes nothing in the folder it works in", async () => {
+    const { d, home, post } = daemon();
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-tf-clean-"));
+    writeFileSync(join(dir, "mine.txt"), "the user's own");
+    const one = (await (await post({ task: 'x @echo {"result":"ok","out":{"a.md":"A"}}', cwd: dir })).json()) as { id: string };
+    await d.engine.idle();
+    const two = (await (await post({ task: 'y @echo {"result":"ok","out":{"b.md":"B"}}', cwd: dir })).json()) as { id: string };
+    await d.engine.idle();
+    expect(readdirSync(dir)).toEqual(["mine.txt"]);
+    // Each task lists what it handed over itself, not the folder's whole history.
+    const files = async (id: string) => ((await (await d.app.request(`/tasks/${id}/files`)).json()) as Listing);
+    expect(await files(one.id)).toMatchObject({ root: "store", files: [{ path: "out/a.md" }] });
+    expect(await files(two.id)).toMatchObject({ root: "store", files: [{ path: "out/b.md" }] });
+    expect(await (await d.app.request(`/tasks/${two.id}/files/out/b.md`)).text()).toBe("B");
+    expect((await d.app.request(`/tasks/${two.id}/files/out/a.md`)).status).toBe(404);
+    expect(existsSync(join(home, "artifacts", one.id, "out", "a.md"))).toBe(true);
+    d.close();
+  });
+
+  it("a task from before, in a folder other tasks handed files over in too, shows what was written while it ran", async () => {
+    const { d, home, post } = daemon();
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-tf-shared-"));
+    mkdirSync(join(dir, "out"));
+    writeFileSync(join(dir, "out", "earlier.md"), "another task's");
+    const long = new Date(Date.now() - 3 * 86_400_000);
+    utimesSync(join(dir, "out", "earlier.md"), long, long);
+    const t = (await (await post({ task: 'x @echo {"result":"ok"}', cwd: dir })).json()) as { id: string };
+    writeFileSync(join(dir, "out", "mine.md"), "this task's");
+    await d.engine.idle();
+    asOlder(home, t.id);
+    const listed = (await (await d.app.request(`/tasks/${t.id}/files`)).json()) as Listing;
+    expect(listed.root).toBe("cwd");
+    expect(listed.files.map((f) => f.path)).toEqual(["out/mine.md"]);
+    d.close();
+  });
+
   it("list and serve only in/ and out/ of a user cwd, without symlinks or hard links", async () => {
     const { d, home, post } = daemon();
     const p = project(home);
@@ -44,6 +83,7 @@ describe("task files", () => {
     expect(created.status).toBe(201);
     const t = (await created.json()) as { id: string };
     await d.engine.idle();
+    asOlder(home, t.id);
     const listed = (await (await d.app.request(`/tasks/${t.id}/files`)).json()) as Listing;
     expect(listed.root).toBe("cwd");
     expect(listed.files.map((f) => f.path)).toEqual(["in/a.txt", "out/pic.svg", "out/report.md"]);
@@ -63,7 +103,7 @@ describe("task files", () => {
   });
 
   it("a symlinked in/ or out/ is not the task's", async () => {
-    const { d, post } = daemon();
+    const { d, home, post } = daemon();
     const dir = mkdtempSync(join(tmpdir(), "agentswitch-tf-links-"));
     const elsewhere = mkdtempSync(join(tmpdir(), "agentswitch-tf-else-"));
     writeFileSync(join(elsewhere, "notes.txt"), "not yours");
@@ -71,6 +111,7 @@ describe("task files", () => {
     symlinkSync(elsewhere, join(dir, "out"));
     const t = (await (await post({ task: 'x @echo {"result":"ok"}', cwd: dir })).json()) as { id: string };
     await d.engine.idle();
+    asOlder(home, t.id);
     expect(await (await d.app.request(`/tasks/${t.id}/files`)).json()).toEqual({ root: "cwd", files: [] });
     expect((await d.app.request(`/tasks/${t.id}/files/out/notes.txt`)).status).toBe(404);
     expect((await d.app.request(`/tasks/${t.id}/files/in/notes.txt`)).status).toBe(404);
@@ -97,6 +138,7 @@ describe("task files", () => {
     writeFileSync(join(outer, "out", "anything"), "x");
     const t = d.engine.submit({ task: 'x @echo {"result":"ok"}', cwd: outer, ephemeral: false });
     await d.engine.idle();
+    asOlder(join(outer, "state"), t.id);
     expect(await (await d.app.request(`/tasks/${t.id}/files`)).json()).toEqual({ root: null, files: [] });
     expect((await d.app.request(`/tasks/${t.id}/files/out/anything`)).status).toBe(404);
     // Nor does a follow-up or a handoff take that cwd over; a follow-up that names its own cwd is fine.

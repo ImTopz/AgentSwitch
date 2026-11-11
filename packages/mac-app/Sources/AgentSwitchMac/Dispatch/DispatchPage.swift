@@ -74,6 +74,7 @@ struct DispatchPage: View {
         switch route {
         case .task(let id): TaskPageView(taskId: id, model: model, open: push, close: back, visible: seen)
         case .topic(let id): TopicPageView(threadId: id, model: model, open: push, close: back, visible: seen)
+        case .files: KeptFilesPage(model: model, open: push, visible: seen)
         }
     }
 

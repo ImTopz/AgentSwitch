@@ -5,12 +5,9 @@
 
 import { namedHosts } from "../executors/browserSlots.js";
 import { isReadOnlyCommand, shellCommandOf } from "../executors/readOnly.js";
-import { join } from "node:path";
 import type { Executor } from "../executors/types.js";
 import { NO_PROTECTED, restoreProtected, snapshotProtected } from "../executors/protected.js";
 import { knownTokens as tokensIn } from "../executors/tokens.js";
-import { listTree } from "../files/artifacts.js";
-import { OUT_DIR } from "../files/names.js";
 import { classifyFailure, excerpt } from "../router/failure.js";
 import { detectRefusal, hasSideEffects, NO_AGENTS, NO_SIDE_EFFECTS, type ExecutionOutcome, type SideEffects } from "../core/outcome.js";
 import { LOOP_FAILURE_MESSAGE, MAX_DISPATCHES, MAX_LOOP_STEPS, nextAction, type NextResult } from "../router/loop.js";
@@ -394,8 +391,7 @@ export class TaskLoop {
   }
 
   private record(task: Task, verdict: OkVerdict, purpose: Purpose, outcome: Exclude<DispatchOutcome, { kind: "cancelled" | "protected" | "blocked" }>): StepRecord {
-    let outFiles: string[] = [];
-    try { outFiles = listTree(join(task.cwd, OUT_DIR)).map((f) => f.path); } catch { outFiles = []; }
+    const outFiles = this.ctx.store.handedFiles(task);
     const effects = outcome.kind === "succeeded" ? outcome.outcome.sideEffects ?? NO_SIDE_EFFECTS : outcome.attempt.sideEffects;
     return {
       kind: "dispatch", purpose, harness: verdict.harness, model: verdict.model, brief: task.brief ?? task.task, ok: outcome.kind === "succeeded",
@@ -453,7 +449,7 @@ export class TaskLoop {
       });
       attemptCtl.signal.throwIfAborted();
       execution = executor.run({
-        taskId: task.id, task: task.task, brief, cwd: task.cwd, model: verdict.model, effort: verdict.effort, attachments: task.attachments,
+        taskId: task.id, task: task.task, brief, cwd: task.cwd, model: verdict.model, effort: verdict.effort, attachments: task.attachments, outDir: this.ctx.store.taskOutDir(task.id),
         handoffNote, context: material.context || null, platformMemory: this.d.composer.platformExperience(task), feedback: this.d.composer.feedbackContext(task), knownTokens: material.knownTokens, threadHome, resume,
         browser, ...(lease ? { browserProfile: lease.dir } : {}), ...(browser && transfer ? { transfer } : {}), signal: attemptCtl.signal,
         emit: (type, payload) => {

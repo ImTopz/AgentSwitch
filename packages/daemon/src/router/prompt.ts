@@ -124,10 +124,12 @@ Rules:
 - If the task belongs to a category listed under the catalog, set "category" to its name and choose harness,
   model and every fallback only from that category's targets; the others refuse such tasks outright.
 - The brief must contain: goal, acceptance criteria, paths not to touch, expected size. Do not invent requirements.
-- Files reach the user one way only: the task's out/ folder in its working directory. Whatever is there appears on
-  the task for the user to download (on the phone too). To send, give or share a file, one that already exists
-  included, the brief says to write or copy it into out/, and that file in out/ is the acceptance criterion. There
-  is no preview panel, share sheet, upload or message channel: never name one in a brief.
+- Files reach the user one way only: the task's own "files for the user" folder, which AgentSwitch keeps outside the
+  working directory and names to the executor in its prompt. Whatever is there appears on the task for the user to
+  download (on the phone too). To send, give or share a file, one that already exists included, the brief says to
+  write or copy it into the task's files-for-the-user folder, and that file being there is the acceptance criterion.
+  Never tell it to make an out/ folder in the working directory. There is no preview panel, share sheet, upload or
+  message channel: never name one in a brief.
 - You may read files under the working directory to judge size and language. Do not modify anything.
 - A working directory under AgentSwitch's own data directory (…/AgentSwitch/work/<id>, also …/.agentswitch/work/<id>)
   is an empty scratch directory made for a phone task. It says nothing about where the user's projects or files are,
@@ -252,7 +254,7 @@ function stepLine(s: StepRecord, i: number): string {
   if (s.kind === "ask_user") return `${i + 1}. ask_user: "${s.question}" → ${s.answer === null ? "no answer" : JSON.stringify(s.answer)}`;
   const head = `${i + 1}. dispatch [${s.purpose}] ${s.harness}/${s.model} — brief: ${JSON.stringify(evidenceExcerpt(s.brief, BRIEF_EXCERPT))}`;
   const outcome = s.ok ? `   → step succeeded (task completion unverified). Reply: ${evidenceExcerpt(s.reply, REPLY_EXCERPT) || "(empty)"}` : `   → failed (${s.failureKind ?? "unknown"}): ${JSON.stringify(evidenceExcerpt(s.reply, REPLY_EXCERPT))}`;
-  return `${head}\n${outcome}\n   side effects: ${s.sideEffects}${s.sideEffectsKnown === false ? " (unknown; verify the actual state before any retry)" : ""}; out/: ${s.outFiles.length ? s.outFiles.join(", ") : "(none)"}; worktree: ${s.diff || "(clean)"}`;
+  return `${head}\n${outcome}\n   side effects: ${s.sideEffects}${s.sideEffectsKnown === false ? " (unknown; verify the actual state before any retry)" : ""}; files for the user: ${s.outFiles.length ? s.outFiles.join(", ") : "(none)"}; worktree: ${s.diff || "(clean)"}`;
 }
 
 export function stepLines(steps: readonly StepRecord[]): string[] { return steps.map(stepLine); }

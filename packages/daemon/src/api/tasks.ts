@@ -7,7 +7,8 @@ import { z } from "zod";
 import { ApprovalPolicy } from "../engine/approvalPolicy.js";
 import { answersFromText, MAX_ANSWER_LENGTH, parseEvidence, validateAnswers } from "../core/questions.js";
 import { TERMINAL, type Task, type TaskEvent } from "../engine/types.js";
-import { MAX_FILES_PER_UPLOAD } from "../files/names.js";
+import { MAX_FILES_PER_UPLOAD, taskInDir } from "../files/names.js";
+import { randomUUID } from "node:crypto";
 import type { Attachment } from "../files/uploads.js";
 import { remoteCaller } from "../core/caller.js";
 import { TargetRef } from "../core/target.js";
@@ -126,9 +127,11 @@ export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly te
   const workDir = cwd ?? inherited ?? folder!.dir;
   const isEphemeral = ephemeral ?? (folder ? !folder.kept : false);
   let attachments: Attachment[] = [];
-  try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
-  catch (err) { return { ok: false, status: 400, error: (err as Error).message, streamError: "附件无法移入任务目录，请重新检查附件后提交。" }; }
-  const task = deps.engine.submit({ ...rest, task: sealed.text, ...(sealed.sealed.length ? { sealed: sealed.sealed } : {}), cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
+  // Into AgentSwitch's own folder under the task's id, not the folder the task works in (files/names.ts).
+  const id = randomUUID().slice(0, 8);
+  try { attachments = uploadIds?.length ? deps.uploads.moveToDir(uploadIds, taskInDir(deps.artifactsDir, id), false) : []; }
+  catch (err) { return { ok: false, status: 400, error: (err as Error).message, streamError: "附件无法保存，请重新检查附件后提交。" }; }
+  const task = deps.engine.submit({ ...rest, task: sealed.text, ...(sealed.sealed.length ? { sealed: sealed.sealed } : {}), id, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
   return { ok: true, task };
 }
 

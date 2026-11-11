@@ -1,9 +1,6 @@
 /** The supervisor's three hooks inside the engine (docs/supervisor-v0.md): answer an approval on the user's
  *  behalf within the approval policy, watch a silent run, and check a finished result against the brief. */
 
-import { join } from "node:path";
-import { listTree } from "../files/artifacts.js";
-import { OUT_DIR } from "../files/names.js";
 import { repairTokens, TOKEN_RE } from "../executors/tokens.js";
 import type { Supervisor } from "../router/supervisor.js";
 import { evidenceExcerpt } from "../core/evidence.js";
@@ -110,8 +107,7 @@ export async function acceptance(ctx: EngineContext, sup: Supervisor | undefined
   if (!options.required && !sup?.config.acceptance) return { rejected: null, rejections: rejectionsSoFar };
   if (!sup) return { rejected: "无法验证原任务是否完成：验收服务不可用", rejections: rejectionsSoFar + 1, unavailable: true };
   if (signal.aborted || TERMINAL.has(ctx.store.getTask(task.id)?.status ?? "cancelled")) return { rejected: "cancelled", rejections: rejectionsSoFar };
-  let outFiles: string[] = [];
-  try { outFiles = listTree(join(task.cwd, OUT_DIR)).map((f) => f.path); } catch { outFiles = []; }
+  const outFiles = ctx.store.handedFiles(task);
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal]);
   const timer = setTimeout(() => controller.abort(new Error("completion verification timed out")), options.timeoutMs ?? SUPPORT_CALL_TIMEOUT_MS);

@@ -30,6 +30,12 @@ public struct TaskFile: Sendable, Hashable, Identifiable {
     public let size: Int64
     public let isDeliverable: Bool
 
+    public init(path: String, size: Int64, isDeliverable: Bool) {
+        self.path = path
+        self.size = size
+        self.isDeliverable = isDeliverable
+    }
+
     public var id: String { path }
     public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
 

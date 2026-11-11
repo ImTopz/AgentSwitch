@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { transferNote, type TransferGrant } from "../core/transfer.js";
 import { COMMUNICATION_GUIDANCE } from "../util/communication.js";
+import { handOverNote } from "../files/notes.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 export const EXECUTOR_MD = resolve(HERE, "..", "..", "config", "EXECUTOR.md");
@@ -26,8 +27,9 @@ const TOKEN_IN_TEXT = /enc:v1:[A-Za-z0-9_=-]{16,}|enc:ref:[A-Za-z0-9_-]{16}(?![A
 /** Brief, then the user's own message when it carries tokens (the router is told not to copy tokens into the brief,
  *  so sealed values and their legend reach the executor only this way), then handoff, then CONTEXT.md; last, the
  *  active field-transfer grant, if any (the executor passes only one that is really wired into the browser gate). */
-export function composePrompt(input: { brief: string; task?: string; handoffNote: string | null; context: string | null; platformMemory?: string | null; feedback?: string | null; transfer?: TransferGrant | null }): string {
+export function composePrompt(input: { brief: string; task?: string; handoffNote: string | null; context: string | null; platformMemory?: string | null; feedback?: string | null; transfer?: TransferGrant | null; outDir?: string | null }): string {
   const parts = [input.brief];
+  if (input.outDir) parts.push(handOverNote(input.outDir));
   if (input.task && input.task !== input.brief && TOKEN_IN_TEXT.test(input.task)) parts.push(`The user's own message (credentials are already secret-gate tokens; copy them from here, whole. Any appended AgentSwitch credential legend and record layout are model-inferred candidates, not the user's confirmed statements):\n${input.task}`);
   if (input.handoffNote) parts.push(`Handoff from a previous attempt:\n${input.handoffNote}`);
   if (input.context?.trim()) parts.push(`User environment context (maintained by the user; enc:v1: and enc:ref: values are secret-gate tokens that only work through the gate, use them as given and never try to decode or replace them):\n${input.context.trim()}`);

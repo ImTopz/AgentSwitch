@@ -92,6 +92,16 @@ extension DaemonClient: DispatchService {
         try await get(DispatchTaskFileList.self, "/tasks/\(Self.segment(taskId))/files").taskFiles
     }
 
+    public func keptFiles() async throws -> DispatchKeptFiles {
+        try await get(DispatchKeptFiles.self, "/attachments")
+    }
+
+    @discardableResult
+    public func deleteKeptFiles(taskId: String?) async throws -> DispatchKeptRemoval {
+        let path = taskId.map { "/attachments/\(Self.segment($0))" } ?? "/attachments"
+        return try decode(DispatchKeptRemoval.self, try await dispatchCall("DELETE", path, timeout: DispatchTimeouts.delete))
+    }
+
     @discardableResult
     public func downloadTaskFile(taskId: String, path: String, to destination: URL) async throws -> URL {
         let segments = path.split(separator: "/").map { Self.segment(String($0)) }.joined(separator: "/")

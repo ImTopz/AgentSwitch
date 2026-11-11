@@ -17,7 +17,7 @@ import type { Summarizer } from "../threads/summary.js";
 import { removeTaskMemories } from "../threads/memory.js";
 import { removeTaskPlatformMemories } from "../threads/platformMemory.js";
 import { collectOut } from "../files/artifacts.js";
-import { join } from "node:path";
+import { taskOutDir } from "../files/names.js";
 import { DEFAULT_POLICY, loadPolicy, type ApprovalPolicy } from "./approvalPolicy.js";
 import { ApprovalDesk, type AnswerResult, type GivenAnswer, type ResolvedBy } from "./approvals.js";
 import type { Bus } from "./bus.js";
@@ -49,7 +49,7 @@ export type EngineDeps = ComposeDeps & {
   /** The executors' native sessions of deleted threads and tasks, no longer recorded anywhere (threads-v0 删除): the
    *  ones kept outside the thread's home (OpenCode's, in the user's own database) are deleted there. */
   readonly deleteSessions?: (sessions: readonly { harness: string; sessionId: string }[]) => void;
-  /** Where <cwd>/out is copied before an ephemeral working directory is deleted. */
+  /** Where the tasks' files are kept, each task's under its id (files/names.ts). */
   readonly artifactsDir?: string;
   /** Rewrites the thread summary after every execution (threads-v0 §3); absent in tests. */
   readonly summarizer?: Summarizer;
@@ -327,7 +327,8 @@ export class Engine {
   }
 
   private cleanup(task: Task): void {
-    const artifacts = this.deps.artifactsDir ? collectOut(task.cwd, join(this.deps.artifactsDir, task.id)) : 0;
+    // An agent that still wrote into the folder's own out/ (an older habit): kept with what it handed over properly.
+    const artifacts = this.deps.artifactsDir ? collectOut(task.cwd, taskOutDir(this.deps.artifactsDir, task.id)) : 0;
     const report = cleanupEphemeral(task.cwd, this.deps.cleanupPaths ?? defaultCleanupPaths());
     this.ctx.emit(task.id, "cleaned", { ...report, artifacts });
   }

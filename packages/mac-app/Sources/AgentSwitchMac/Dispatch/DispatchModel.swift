@@ -39,6 +39,12 @@ final class DispatchModel {
     /// The copies here, by `task/path`: which version of the file each is (DispatchTaskFile.version). A copy of
     /// another version than the Mac lists is not the file any more.
     var copies: [String: String] = [:]
+    /// Where each of those copies is: in Downloads, under the name it was free to take (2026-11-11).
+    var copyURLs: [String: URL] = [:]
+    /// Every task's kept files together (`GET /attachments`), read while the Files page is shown; nil until read.
+    var kept: DispatchKeptFiles?
+    /// Why they could not be read.
+    var keptError: String?
     /// A web-type file shown as its source (never rendered).
     var sourceFile: SourceFile?
 
@@ -135,7 +141,7 @@ final class DispatchModel {
         case .task(let id)?:
             guard !onRecord else { return false }
             candidates = pending(id)
-        case .topic?:
+        case .topic?, .files?:
             return false
         case nil:
             guard onRecord else { return false }

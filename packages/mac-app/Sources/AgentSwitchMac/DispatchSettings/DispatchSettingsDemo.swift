@@ -174,6 +174,8 @@ struct DispatchSettingsDemo: DispatchService {
     func deleteTask(id: String) async throws { throw Self.unsupported }
     func taskFiles(taskId: String) async throws -> [DispatchTaskFile] { [] }
     func downloadTaskFile(taskId: String, path: String, to destination: URL) async throws -> URL { throw Self.unsupported }
+    func keptFiles() async throws -> DispatchKeptFiles { DispatchKeptFiles(tasks: []) }
+    func deleteKeptFiles(taskId: String?) async throws -> DispatchKeptRemoval { throw Self.unsupported }
     func taskEvents(taskId: String, after: Int64) -> AsyncThrowingStream<DispatchTaskEvent, Error> { AsyncThrowingStream { $0.finish() } }
     func upload(_ files: [DispatchUploadFile]) async throws -> [DispatchStagedUpload] { throw Self.unsupported }
     func targets() async throws -> DispatchTargets { throw Self.unsupported }

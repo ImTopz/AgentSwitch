@@ -94,6 +94,10 @@ final class AppModel {
     var sheet: HomeSheet?
     /// The app opens on the terminals (2026-10-07, user: 手机默认进入 terminal 页吧): what the phone is used for most.
     var tab: MainTab = .terminals
+    /// The sample screens' kept files (`-uiDemoScreen keptfiles`); nil with a real Mac.
+    var demoKeptFiles: KeptFiles?
+    /// Asks the Dispatch page to show every task's files (the sample screen).
+    var openKeptFilesRequest = false
     /// The terminals tab (its list, the Mac's other sessions, the colours).
     let terminals = TerminalsStore()
     /// A terminal to open on the terminals tab (a demo screen); the tab takes it.

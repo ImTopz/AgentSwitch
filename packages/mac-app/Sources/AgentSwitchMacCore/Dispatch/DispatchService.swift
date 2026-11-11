@@ -46,6 +46,10 @@ public protocol DispatchService: Sendable {
     func taskFiles(taskId: String) async throws -> [DispatchTaskFile]
     /// `GET /tasks/:id/files/<path>` written to `destination` (replaced if there); returns `destination`.
     @discardableResult func downloadTaskFile(taskId: String, path: String, to destination: URL) async throws -> URL
+    /// `GET /attachments`: every task's kept files together.
+    func keptFiles() async throws -> DispatchKeptFiles
+    /// `DELETE /attachments/:id` (409 while the task is at work), or `DELETE /attachments` for `nil`: everyone's.
+    @discardableResult func deleteKeptFiles(taskId: String?) async throws -> DispatchKeptRemoval
     /// `GET /tasks/:id/events?after=` (SSE): replays what came after `after`, then follows; reconnects from the last
     /// event it delivered; ends after done, partial, blocked, failed or cancelled, or at once for an ended task.
     func taskEvents(taskId: String, after: Int64) -> AsyncThrowingStream<DispatchTaskEvent, Error>

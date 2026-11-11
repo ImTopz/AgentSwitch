@@ -45,6 +45,14 @@ struct DispatchDemoService: DispatchService {
     @discardableResult func acknowledge(taskId: String) async throws -> Int64? { nil }
     func deleteTask(id: String) async throws {}
     func taskFiles(taskId: String) async throws -> [DispatchTaskFile] { data.files[taskId] ?? [] }
+    /// Every sample task's files, newest task first.
+    func keptFiles() async throws -> DispatchKeptFiles {
+        DispatchKeptFiles(tasks: data.tasks.sorted { $0.createdAt > $1.createdAt }.compactMap { task in
+            guard let files = data.files[task.id], !files.isEmpty else { return nil }
+            return .init(id: task.id, title: DispatchMessageDisplay.readable(task.task), createdAt: Double(task.createdAt), files: DispatchTaskFile.pageOrder(files))
+        })
+    }
+    @discardableResult func deleteKeptFiles(taskId: String?) async throws -> DispatchKeptRemoval { DispatchKeptRemoval(removed: 0, busy: 0) }
 
     @discardableResult func downloadTaskFile(taskId: String, path: String, to destination: URL) async throws -> URL {
         try Data("演示文件 \(path)\n".utf8).write(to: destination, options: .atomic)

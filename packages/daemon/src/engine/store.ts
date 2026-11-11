@@ -1,5 +1,7 @@
 /** SQLite persistence for tasks, events and approvals, plus a JSONL mirror of events per task. */
 
+import { listTree } from "../files/artifacts.js";
+import { OUT_DIR, taskOutDir } from "../files/names.js";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from "node:fs";
@@ -116,9 +118,24 @@ export class Store {
     this.now = opts.now ?? Date.now;
   }
 
+  /** Where task `id` hands files to the user (files/names.ts), made if it is not there; null without a store for them
+   *  (tests) — the task's `out/` in its working directory is used then, as it was before 2026-11-11. */
+  taskOutDir(id: string): string | null {
+    if (!this.artifactsDir || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
+    const dir = taskOutDir(this.artifactsDir, id);
+    try { mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { return null; }
+    return dir;
+  }
+
+  /** What the task has handed over, as paths in its folder for that; a task from before it, its `<cwd>/out`. */
+  handedFiles(task: Task): string[] {
+    const own = this.artifactsDir && /^[A-Za-z0-9_-]+$/.test(task.id) ? taskOutDir(this.artifactsDir, task.id) : null;
+    try { return listTree(own && existsSync(own) ? own : join(task.cwd, OUT_DIR)).map((f) => f.path); } catch { return []; }
+  }
+
   createTask(input: NewTask): Task {
     const ts = this.now();
-    const id = randomUUID().slice(0, 8);
+    const id = input.id ?? randomUUID().slice(0, 8);
     this.db.prepare(
       `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser, ephemeral, parent_id, attachments, thread_id, exclude, handoff_from, approval_policy) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, ts, ts, input.task, input.cwd, input.pin ? JSON.stringify(input.pin) : null, input.needsBrowser ? 1 : 0, input.ephemeral ? 1 : 0, input.parentId ?? null, JSON.stringify(input.attachments ?? []),

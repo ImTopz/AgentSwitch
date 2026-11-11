@@ -66,6 +66,7 @@ enum MainWindowPreview {
             try await shot(model: model, page: .dispatch, system: look, open: .task("t1"), to: file("main-dispatch-task"))
             model.loadDemo()
             try await shot(model: model, page: .dispatch, system: look, open: .topic("th1"), to: file("main-dispatch-topic"))
+            try await shot(model: model, page: .dispatch, system: look, open: .files, to: file("main-dispatch-files"))
             try await shot(model: model, page: .dispatch, system: look, open: .task("t5"), to: file("main-dispatch-code"))
             try await shot(model: model, page: .terminals, system: look, to: file("main-terminals"))
         }

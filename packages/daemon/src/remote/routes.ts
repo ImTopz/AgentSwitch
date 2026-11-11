@@ -28,6 +28,10 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/search"],
   ["GET", "/tasks/:id/files"],
   ["GET", "/tasks/:id/files/*"],
+  // Every task's kept files together, and their removal (Dispatch › Files; the tasks stay).
+  ["GET", "/attachments"],
+  ["DELETE", "/attachments"],
+  ["DELETE", "/attachments/:id"],
   // The Files column (docs/files-v0.md §7): read only, and only while this node lets paired devices read its files,
   // inside the device's scope (`GET /settings/mesh`, `GET /devices`; both this node's own).
   ["GET", "/files"],

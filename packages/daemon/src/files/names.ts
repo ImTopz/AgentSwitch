@@ -2,10 +2,15 @@
 
 import { basename, extname } from "node:path";
 
-/** Uploaded attachments land here, relative to the task's working directory. */
+/** A task's files live in AgentSwitch's own data folder, `$AGENTSWITCH_HOME/artifacts/<taskId>/` (2026-11-11, user: 你就
+ *  不能在agentswitch的应用数据文件夹做点文章么 — nothing of this is made in the folder a task works in any more): what the
+ *  user attached under `in/`, what the agent hands back under `out/`. Tasks from before kept both in their working
+ *  directory under the same two names; those are still read from there. */
 export const ATTACH_DIR = "in";
-/** Executors put deliverables for the user here; copied to $AGENTSWITCH_HOME/artifacts/<taskId>/ before an ephemeral cwd is deleted. */
 export const OUT_DIR = "out";
+/** Where task `id` hands files to the user. */
+export const taskOutDir = (artifactsDir: string, id: string): string => `${artifactsDir}/${id}/${OUT_DIR}`;
+export const taskInDir = (artifactsDir: string, id: string): string => `${artifactsDir}/${id}/${ATTACH_DIR}`;
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 export const MAX_FILES_PER_UPLOAD = 20;
 export const MAX_NAME_LENGTH = 120;

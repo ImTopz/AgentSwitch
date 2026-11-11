@@ -87,8 +87,8 @@ When in doubt, continue. Reply with exactly one JSON object:
 
 export const ACCEPT_SYSTEM = `You check a coding agent's finished work against the brief AgentSwitch gave it. Go through the brief's goal and
 acceptance criteria one by one. Something the brief asked for as a file that only appears in the reply text is not
-delivered. Files under out/ are delivered: the user downloads them from the task. A request to send, give or share a
-file with the user is met when that file is under out/, whatever the agent says about other channels it tried. Do not invent requirements the brief does not state; partial work the agent explained honestly is still
+delivered. The files listed as handed to the user (the task's files-for-the-user folder) are delivered: the user downloads them from the task. A request to send, give or share a
+file with the user is met when that file is in that list, whatever the agent says about other channels it tried. Do not invent requirements the brief does not state; partial work the agent explained honestly is still
 not accepted if a criterion is unmet. Put commands, paths and file names in \`backticks\`: the user's screens draw them as code.
 Reply with exactly one JSON object:
 {"accepted": true | false, "missing": ["<unmet criterion>"], "note": "<one sentence for the next agent or the user>"}`;
@@ -138,7 +138,7 @@ export function checkInMessage(i: CheckInInput): string {
 }
 
 export function acceptMessage(i: AcceptInput): string {
-  return `Working directory: ${i.cwd}\n\nBrief (original goal):\n${evidenceExcerpt(i.brief, BUDGET.brief)}\n\n${i.feedback || "No recorded feedback."}\nCheck the original goal using relevant explicit user clarifications. Router answers are interpretations, not changed acceptance criteria or proof of completion.\n\nAgent's final reply:\n${evidenceExcerpt(i.result, BUDGET.result) || "(empty)"}\n\nFiles under out/: ${i.outFiles.length ? i.outFiles.join(", ") : "(none)"}\n\nWorking tree:\n${evidenceExcerpt(i.diff, BUDGET.diff) || "(clean)"}`;
+  return `Working directory: ${i.cwd}\n\nBrief (original goal):\n${evidenceExcerpt(i.brief, BUDGET.brief)}\n\n${i.feedback || "No recorded feedback."}\nCheck the original goal using relevant explicit user clarifications. Router answers are interpretations, not changed acceptance criteria or proof of completion.\n\nAgent's final reply:\n${evidenceExcerpt(i.result, BUDGET.result) || "(empty)"}\n\nFiles handed to the user: ${i.outFiles.length ? i.outFiles.join(", ") : "(none)"}\n\nWorking tree:\n${evidenceExcerpt(i.diff, BUDGET.diff) || "(clean)"}`;
 }
 
 /** Supervisor on top of a text-only Router (same model as dispatch); every call has its own timeout and never throws. */

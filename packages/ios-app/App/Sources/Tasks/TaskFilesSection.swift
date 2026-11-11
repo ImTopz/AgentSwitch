@@ -64,25 +64,30 @@ struct TaskFilesSection: View {
     let taskId: String
     let files: [TaskFile]
     let opener: TaskFileOpener
+    /// Under the word `Files` (a task page); without it where the page itself is the files' (KeptFilesView).
+    var titled = true
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        @Bindable var opener = opener
         if !files.isEmpty {
-            Block("Files") {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
-                        if index > 0 { Theme.line.frame(height: 1).padding(.leading, 34) }
-                        Button { Task { await opener.open(file, taskId: taskId, model: model) } } label: { row(file) }
-                            .buttonStyle(.plain)
-                            .disabled(opener.downloading != nil)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
-                if opener.error != nil { ErrorText(message: $opener.error) }
+            if titled { Block("Files") { list } } else { VStack(alignment: .leading, spacing: Theme.Space.s) { list } }
+        }
+    }
+
+    @ViewBuilder
+    private var list: some View {
+        @Bindable var opener = opener
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
+                if index > 0 { Theme.line.frame(height: 1).padding(.leading, 34) }
+                Button { Task { await opener.open(file, taskId: taskId, model: model) } } label: { row(file) }
+                    .buttonStyle(.plain)
+                    .disabled(opener.downloading != nil)
             }
         }
+        .padding(.horizontal, 14)
+        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+        if opener.error != nil { ErrorText(message: $opener.error) }
     }
 
     private func row(_ file: TaskFile) -> some View {

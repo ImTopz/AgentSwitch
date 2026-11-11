@@ -10,6 +10,8 @@ import SwiftUI
 enum DispatchRoute: Hashable {
     case task(String)
     case topic(String)
+    /// Every task's kept files together (KeptFilesPage).
+    case files
 }
 
 /// What you said, right-aligned in a raised square box, as you typed it (its code drawn as code, TypedText); `N attached`

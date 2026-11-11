@@ -21,10 +21,13 @@ const cfg = SupervisorConfig.parse({ watchdog_ms: 120 });
 describe("files for the user", () => {
   // 2026-09-29: "send it to me" was briefed as a preview panel that does not exist, and the archive the executor then
   // put in out/ was judged undelivered.
-  it("out/ is the one way a file reaches the user, for the router, the executor and the acceptance check", () => {
-    expect(systemPrompt(targets)).toContain("Files reach the user one way only: the task's out/ folder");
+  // 2026-11-11: that folder is the task's own in the data directory, no longer an out/ in the folder it works in.
+  it("the task's own folder is the one way a file reaches the user, for the router, the executor and the acceptance check", () => {
+    expect(systemPrompt(targets)).toContain("Files reach the user one way only: the task's own \"files for the user\" folder");
+    expect(systemPrompt(targets)).toContain("Never tell it to make an out/ folder in the working directory.");
     expect(executorInstructions()).toContain("that is the only way a file reaches the user");
-    expect(ACCEPT_SYSTEM).toContain("A request to send, give or share a\nfile with the user is met when that file is under out/");
+    expect(executorInstructions()).toContain("never create an `out/` or `in/` folder in the working directory");
+    expect(ACCEPT_SYSTEM).toContain("A request to send, give or share a\nfile with the user is met when that file is in that list");
   });
 });
 

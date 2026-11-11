@@ -39,6 +39,14 @@ struct AgentSwitchApp: App {
             case "interrupted": model.tab = .tasks; model.openTaskRequest = "t6"
             // The Dispatch page itself (the app opens on the terminals).
             case "home", "offline": model.tab = .tasks
+            case "keptfiles":
+                model.tab = .tasks
+                model.demoKeptFiles = KeptFiles(tasks: [
+                    .init(id: "t3", title: "整理下载目录里的重复文件", createdAt: Date().timeIntervalSince1970 * 1000 - 3_600_000,
+                          files: [TaskFile(path: "out/report.md", size: 4_096, isDeliverable: true), TaskFile(path: "out/dupes.txt", size: 1_024, isDeliverable: true)]),
+                    .init(id: "t1", title: "把这张截图里的表格转成 Excel", createdAt: Date().timeIntervalSince1970 * 1000 - 2 * 86_400_000,
+                          files: [TaskFile(path: "out/table.xlsx", size: 58_000, isDeliverable: true), TaskFile(path: "in/shot.png", size: 401_000, isDeliverable: false)])])
+                model.openKeptFilesRequest = true
             case "terminals", "terminalsconnecting", "terminalmenu", "terminalmenuprofile", "terminaldelete", "terminalselect", "terminaldeletemany", "terminalsearch", "terminalprofiles": model.tab = .terminals
             // A long tree read again as the Mac's is (TerminalsListProbe).
             case "terminalsmany": model.tab = .terminals; TerminalsListProbe.start(model)

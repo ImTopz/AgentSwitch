@@ -337,7 +337,7 @@ describe("remote route allowlist", () => {
     expect(REMOTE_ROUTES.map(([m, p]) => `${m} ${p}`)).toEqual([
       "GET /healthz", "POST /pair", "GET /me", "DELETE /me", "GET /node", "GET /addresses", "GET /gate/pubkey", "GET /tasks", "POST /tasks", "GET /tasks/:id", "GET /tasks/:id/events",
       "POST /tasks/:id/answer", "POST /tasks/:id/approve", "POST /tasks/:id/cancel", "POST /tasks/:id/handoff", "POST /tasks/:id/rate",
-      "POST /tasks/:id/ack", "GET /search", "GET /tasks/:id/files", "GET /tasks/:id/files/*", "GET /files", "GET /files/stat", "GET /files/preview", "GET /files/thumbnail", "GET /files/content",
+      "POST /tasks/:id/ack", "GET /search", "GET /tasks/:id/files", "GET /tasks/:id/files/*", "GET /attachments", "DELETE /attachments", "DELETE /attachments/:id", "GET /files", "GET /files/stat", "GET /files/preview", "GET /files/thumbnail", "GET /files/content",
       "POST /files/folder", "POST /files/file", "POST /files/rename", "POST /files/trash", "POST /files/restore", "PUT /files/content", "GET /approvals", "GET /threads", "GET /threads/:id", "PATCH /threads/:id",
       "POST /threads/:id/archive", "POST /threads/:id/reopen", "DELETE /tasks/:id", "DELETE /threads/:id", "GET /quota", "POST /quota/refresh",
       "GET /targets", "POST /uploads", "GET /context", "PUT /context", "GET /context/example", "POST /assistant", "GET /assistant", "DELETE /assistant/:seq", "DELETE /history",

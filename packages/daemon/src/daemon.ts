@@ -359,6 +359,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const artifactsDir = join(cfg.home, "artifacts");
   sweepDir(uploads.dir, UPLOAD_TTL_MS);
   sweepDir(artifactsDir, ARTIFACT_TTL_MS);
+  // And every few hours while the service runs (2026-11-11, user: 然后定期清理缓存): it may stay up for weeks.
+  setInterval(() => { try { sweepDir(uploads.dir, UPLOAD_TTL_MS); sweepDir(artifactsDir, ARTIFACT_TTL_MS); } catch { /* the next round */ } }, 6 * 3600_000).unref();
   // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
   // The summarizer is a text-only agent on the router's model, run in a scratch dir so it never explores the repo.
   mkdirSync(join(cfg.home, "router-scratch"), { recursive: true });

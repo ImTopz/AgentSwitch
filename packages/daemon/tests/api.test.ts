@@ -103,7 +103,7 @@ describe("HTTP API", () => {
     d.close();
   });
 
-  it("uploads attachments into <cwd>/in, lists and downloads task files, collects out/ after an ephemeral task", async () => {
+  it("uploads attachments into the task's own folder in the data directory, lists and downloads task files, keeps what was handed back after an ephemeral task", async () => {
     const { d, home } = daemon();
     const form = new FormData();
     form.append("files", new File([Buffer.from("PNG")], "shot.png", { type: "image/png" }));
@@ -120,10 +120,13 @@ describe("HTTP API", () => {
     const created = await d.app.request("/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: 'read the files @echo {"delayMs":300,"out":{"report.md":"# done","img/p.png":"P"}}', attachments: files.map((f) => f.id) }) });
     const t = (await created.json()) as { id: string; cwd: string; ephemeral: boolean; attachments: { path: string }[] };
     expect(t.ephemeral).toBe(true);
-    expect(t.attachments.map((a) => a.path)).toEqual(["in/shot.png", "in/spec.md"]);
-    expect(readFileSync(join(t.cwd, "in", "spec.md"), "utf8")).toBe("spec");
+    // Nothing of it in the folder the task works in (2026-11-11).
+    const kept = join(home, "artifacts", t.id);
+    expect(t.attachments.map((a) => a.path)).toEqual([join(kept, "in", "shot.png"), join(kept, "in", "spec.md")]);
+    expect(readFileSync(join(kept, "in", "spec.md"), "utf8")).toBe("spec");
+    expect(existsSync(join(t.cwd, "in"))).toBe(false);
     const listed = (await (await d.app.request(`/tasks/${t.id}/files`)).json()) as { root: string; files: { path: string }[] };
-    expect(listed.root).toBe("cwd");
+    expect(listed.root).toBe("store");
     expect(listed.files.map((f) => f.path)).toEqual(["in/shot.png", "in/spec.md"]);
     const dl = await d.app.request(`/tasks/${t.id}/files/in/shot.png`);
     expect(dl.status).toBe(200);
@@ -135,13 +138,23 @@ describe("HTTP API", () => {
     await d.engine.idle();
     const done = (await (await d.app.request(`/tasks/${t.id}`)).json()) as { status: string; brief: string };
     expect(done.status).toBe("done");
-    expect(d.engine.composeTask(d.store.getTask(t.id)!)).toContain("in/shot.png (3 B, image/png)");
+    expect(d.engine.composeTask(d.store.getTask(t.id)!)).toContain(`${join(kept, "in", "shot.png")} (3 B, image/png)`);
     expect(existsSync(t.cwd)).toBe(false);
     const after = (await (await d.app.request(`/tasks/${t.id}/files`)).json()) as { root: string; files: { path: string; size: number }[] };
-    expect(after.root).toBe("artifacts");
-    expect(after.files.map((f) => f.path)).toEqual(["img/p.png", "report.md"]);
-    expect(await (await d.app.request(`/tasks/${t.id}/files/report.md`)).text()).toBe("# done");
-    expect(existsSync(join(home, "artifacts", t.id, "report.md"))).toBe(true);
+    expect(after.root).toBe("store");
+    expect(after.files.map((f) => f.path)).toEqual(["in/shot.png", "in/spec.md", "out/img/p.png", "out/report.md"]);
+    expect(await (await d.app.request(`/tasks/${t.id}/files/out/report.md`)).text()).toBe("# done");
+    expect(existsSync(join(home, "artifacts", t.id, "out", "report.md"))).toBe(true);
+    // Every task's kept files together, and their removal: the task stays.
+    const all = (await (await d.app.request("/attachments")).json()) as { tasks: { id: string; title: string; files: { path: string }[] }[]; bytes: number; keptDays: number };
+    expect(all.tasks.map((x) => [x.id, x.title, x.files.length])).toEqual([[t.id, "read the files @echo {\"delayMs\":300,\"out\":{\"report.md\":\"# done\",\"img/p.png\":\"P\"}}", 4]]);
+    expect(all.bytes).toBe(3 + 4 + 6 + 1);
+    expect(all.keptDays).toBe(7);
+    expect((await d.app.request("/attachments/nope", { method: "DELETE" })).status).toBe(404);
+    expect(await (await d.app.request(`/attachments/${t.id}`, { method: "DELETE" })).json()).toEqual({ removed: 1, busy: 0 });
+    expect(((await (await d.app.request("/attachments")).json()) as { tasks: unknown[] }).tasks).toEqual([]);
+    expect((await d.app.request(`/tasks/${t.id}`)).status).toBe(200);
+    expect(((await (await d.app.request(`/tasks/${t.id}/files`)).json()) as { files: unknown[] }).files).toEqual([]);
     expect((await d.app.request(`/tasks/nope/files`)).status).toBe(404);
     d.close();
   });

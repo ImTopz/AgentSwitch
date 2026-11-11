@@ -9,6 +9,7 @@ struct HomeView: View {
     @Environment(AppModel.self) private var model
     @State private var feed = FeedModel()
     @State private var path = NavigationPath()
+    @Environment(\.interfaceLook) private var look
     @State private var deleting: DeleteRequest?
     /// The cards' files: downloaded and previewed here.
     @State private var opener = TaskFileOpener()
@@ -48,7 +49,15 @@ struct HomeView: View {
                         }
                     }
                 }
+                // Every task's files together, and their removal (2026-11-11).
+                ToolbarItem(placement: .primaryAction) {
+                    Button { path.append(KeptFilesRoute()) } label: {
+                        if look.isClassic { Image(systemName: "folder") } else { Text("Files").mono(15, weight: .medium) }
+                    }
+                    .accessibilityLabel("Files")
+                }
             }
+            .navigationDestination(for: KeptFilesRoute.self) { _ in KeptFilesView { path.append($0) } }
             .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .navigationDestination(for: ThreadRoute.self) { route in ThreadView(threadId: route.id) { path.append($0) } }
             .task {
@@ -65,6 +74,7 @@ struct HomeView: View {
             .onChange(of: model.openTaskRequest) { openRequestedTask() }
             // A cold start from a Live Activity: the request is there before this screen is.
             .onAppear { openRequestedTask() }
+            .onAppear { if model.openKeptFilesRequest { model.openKeptFilesRequest = false; path.append(KeptFilesRoute()) } }
             .onChange(of: path) { if !path.isEmpty { Keyboard.dismiss() } }
             .onAppear { feed.visible = true }
             .onDisappear {
