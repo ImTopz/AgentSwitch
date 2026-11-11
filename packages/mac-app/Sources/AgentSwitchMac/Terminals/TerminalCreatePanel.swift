@@ -55,25 +55,33 @@ struct TerminalCreatePanel: View {
 
     // MARK: the agent
 
-    /// What can be started: the four agents, and after them a shell where the service opens one for this Mac.
+    /// What can be started: the agents, and after them a shell where the service opens one for this Mac.
     private var choices: [(id: String, name: String)] {
         TerminalListText.agents + (model.shellOffered ? [(id: TerminalKind.shell, name: TerminalKind.shellName)] : [])
     }
 
     /// The choices side by side; in a narrow pane rows of two. Five in a row are set a little closer than four were:
-    /// the longest name (`Claude Code`) still has its room.
+    /// the longest name (`Claude Code`) still has its room. Six — Grok came (2026-11-11, user: 能否增加对Grok的支持),
+    /// and with the shell that is one more than the panel's width holds at that size — stand in two rows of three,
+    /// each tile as wide as the fields under them divide.
     private var agents: some View {
         let all = choices
         let five = all.count > 4
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: five ? 8 : 10) { ForEach(all, id: \.id) { tile($0.id, $0.name, inset: five ? 8 : 10).frame(minWidth: five ? 100 : 104) } }
-            VStack(spacing: 10) {
-                ForEach(Array(stride(from: 0, to: all.count, by: 2)), id: \.self) { first in
-                    HStack(spacing: 10) {
-                        ForEach(all[first..<min(first + 2, all.count)], id: \.id) { tile($0.id, $0.name) }
-                        // An odd one out keeps a tile's width.
-                        if first + 1 == all.count { Color.clear.frame(maxWidth: .infinity, maxHeight: Self.tileHeight) }
-                    }
+            rows(of: all.count > 5 ? 3 : 2, all, minWidth: all.count > 5 ? 104 : nil)
+            rows(of: 2, all, minWidth: nil)
+        }
+    }
+
+    /// The choices `n` to a row; a row short of that keeps the tiles' width. `minWidth`: what a tile needs for the
+    /// rows to count as fitting (the last resort has none: it always fits).
+    private func rows(of n: Int, _ all: [(id: String, name: String)], minWidth: CGFloat?) -> some View {
+        VStack(spacing: 10) {
+            ForEach(Array(stride(from: 0, to: all.count, by: n)), id: \.self) { first in
+                HStack(spacing: 10) {
+                    ForEach(all[first..<min(first + n, all.count)], id: \.id) { tile($0.id, $0.name).frame(minWidth: minWidth) }
+                    ForEach(0..<max(0, first + n - all.count), id: \.self) { _ in Color.clear.frame(minWidth: minWidth, maxWidth: .infinity, maxHeight: Self.tileHeight) }
                 }
             }
         }
