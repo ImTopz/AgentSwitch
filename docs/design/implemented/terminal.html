@@ -477,15 +477,18 @@ function tree() {
   return shown.filter((p) => holder(p) === null).map((p) => make(p, p.split("/").pop()));
 }
 // The list's filter: one agent's rows alone (null: every agent's), and what is active alone.
-let filtAgent = null, filtActive = false;
-const keeps = (i) => (!filtAgent || i.ag === filtAgent) && (!filtActive || (i.kind === "term" ? i.st !== "exited" : i.active === true));
+let filtAgent = null, filtActive = false, filtRecent = false;
+// Recent (2026-11-11): every terminal listed, the sessions of the last three days.
+const keeps = (i) => (!filtAgent || i.ag === filtAgent) && (!filtActive || (i.kind === "term" ? i.st !== "exited" : i.active === true))
+  && (!filtRecent || i.kind === "term" || i.active === true || now - i.at <= 3 * d);
 const allItems = (node) => [...(node.own?.items ?? []), ...node.children.flatMap(allItems)];
 const everyItem = (node) => allItems(node).filter(keeps);
 function renderFilt() {
   const there = new Set(tree().flatMap(allItems).map((i) => i.ag));
   const agents = ["cc", "codex", "oc", "pi"].filter((a) => there.has(a) || a === filtAgent);
   document.getElementById("filt").innerHTML = agents.map((a) => `<span class="${a === filtAgent ? "on" : ""}" data-filt="${a}" title="${AGENT_NAME[a]} Only">${sprite(AGENT_PX[a], { px: 2 })}</span>`).join("")
-    + `<span class="act ${filtActive ? "on" : ""}" data-filt="active" title="Running Terminals and Sessions Being Written Now">Active</span>`;
+    + `<span class="act ${filtRecent ? "on" : ""}" data-filt="recent" title="Open Terminals and Sessions of the Last 3 Days">Recent</span>`
+    + `<span class="${filtActive ? "on" : ""}" data-filt="active" title="Running Terminals and Sessions Being Written Now">Active</span>`;
 }
 /** Every folder, depth first, named under the folders it sits in (Worktop/培训/靶场), for the search. */
 const everyFolder = (nodes, above = "") => nodes.flatMap((n) => {
@@ -552,7 +555,7 @@ function render() {
   const renderFolder = (node, depth) => {
     const f = node.own;
     // The filter left nothing in it or under it: no line.
-    if ((filtAgent || filtActive) && !everyItem(node).length) return;
+    if ((filtAgent || filtActive || filtRecent) && !everyItem(node).length) return;
     const shut = closed.has(node.path);
     out.push(`<div class="dir ${f ? "" : "parent"}" data-dir="${node.path}" style="padding-left:calc(10px + ${depth * 2}ch)"><span class="chev">${shut ? "▸" : "▾"}</span><span class="name">${esc(node.label)}/${git(f?.git)}</span><span class="count">${counts(everyItem(node))}</span><span class="add">+</span></div>`);
     if (shut) return;
@@ -1080,7 +1083,7 @@ document.getElementById("find").addEventListener("input", () => render());
 document.getElementById("filt").addEventListener("click", (e) => {
   const k = e.target.closest("[data-filt]")?.dataset.filt;
   if (!k) return;
-  if (k === "active") filtActive = !filtActive; else filtAgent = filtAgent === k ? null : k;
+  if (k === "active") filtActive = !filtActive; else if (k === "recent") filtRecent = !filtRecent; else filtAgent = filtAgent === k ? null : k;
   render();
 });
 document.addEventListener("keydown", (e) => {

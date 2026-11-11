@@ -806,13 +806,18 @@ extension AppModel {
         let profiles: [String: ProfileChoices] = screen.contains("profile") ? ["claude-code": ProfileChoices(current: "abc123def0", profiles: [
             ProfileChoice(id: "default", name: "Default", account: "me@example.com"), ProfileChoice(id: "abc123def0", name: "cwork1", account: "work@example.com", color: .violet),
             ProfileChoice(id: "abc123def1", name: "side", color: .sand)])] : [:]
-        model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git, profiles: profiles)
+        // `terminalsconnecting`: the first connection still being made, nothing read yet (the Terminals tab's one line).
+        if screen != "terminalsconnecting" { model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git, profiles: profiles) }
         model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent, zoom: DemoBrowser.zoom,
                               browsers: UserDefaults.standard.string(forKey: "uiDemoScreen") == "browserprofiles"
                                 ? [.shared, BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", exit: .init(ip: "203.0.113.9", place: "Tokyo"), running: true)] : nil)
         model.routeReport = (Date().addingTimeInterval(-40), DemoData.routeReport)
         model.demoFiles = DemoFiles(scope: screen == "filesscoped" ? DemoFiles.scopeFolder : nil)
         model.connectionProgress = ConnectionProgress().after(model.connection)
+        if screen == "terminalsconnecting" {
+            model.connection = .selecting
+            model.connectionProgress = ConnectionProgress()
+        }
         if offline {
             let start = Date().addingTimeInterval(-150)
             model.connection = .unreachable

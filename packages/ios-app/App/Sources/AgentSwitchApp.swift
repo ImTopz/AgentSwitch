@@ -39,7 +39,7 @@ struct AgentSwitchApp: App {
             case "interrupted": model.tab = .tasks; model.openTaskRequest = "t6"
             // The Dispatch page itself (the app opens on the terminals).
             case "home", "offline": model.tab = .tasks
-            case "terminals", "terminalmenu", "terminalmenuprofile", "terminaldelete", "terminalselect", "terminaldeletemany", "terminalsearch", "terminalprofiles": model.tab = .terminals
+            case "terminals", "terminalsconnecting", "terminalmenu", "terminalmenuprofile", "terminaldelete", "terminalselect", "terminaldeletemany", "terminalsearch", "terminalprofiles": model.tab = .terminals
             // A long tree read again as the Mac's is (TerminalsListProbe).
             case "terminalsmany": model.tab = .terminals; TerminalsListProbe.start(model)
             case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard", "terminalquestion", "terminallink", "terminalpath",

@@ -28,6 +28,9 @@ struct ConnectionBanner: View {
                 BrailleSpinner(color: .secondary)
                 Text(phase.text).mono(12).foregroundStyle(.secondary)
             }
+            // As wide as the page, like the other lines: alone in a scroll view this one line made the whole list as
+            // narrow as itself, a grey band down the middle of the Terminals tab (2026-11-11, user: 这是个啥玩意).
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .failing, .lost:
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 HStack(spacing: 6) {

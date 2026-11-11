@@ -54,23 +54,34 @@ public enum TerminalListRow: Equatable, Sendable, Identifiable {
 /// What of the list is shown (docs/terminal-v0.md §1 Mac, 2026-10-11, user: 这里要加上筛选某个agent的会话 和筛选活跃会话的功能):
 /// one agent's terminals and sessions alone, and what is active alone — the terminals that run, and the sessions the
 /// service says are being written now (one open in another program). Both can be on.
+/// `recent` (2026-11-11, user: 这里应该加一个resent功能，用来快速筛选近期活跃会话): the sessions last written within
+/// `recentDays`, and every terminal in the list (one listed is open now). With `active` on too, what both keep.
 public struct TerminalListFilter: Equatable, Sendable {
+    /// How far back `recent` looks.
+    public static let recentDays = 3
+
     /// An agent's id (`codex`); nil: every agent's.
     public var agent: String?
     public var active: Bool
+    public var recent: Bool
 
-    public init(agent: String? = nil, active: Bool = false) {
+    public init(agent: String? = nil, active: Bool = false, recent: Bool = false) {
         self.agent = agent
         self.active = active
+        self.recent = recent
     }
 
-    public var isOn: Bool { agent != nil || active }
+    public var isOn: Bool { agent != nil || active || recent }
 
     public func keeps(_ terminal: TerminalInfo) -> Bool { (agent == nil || terminal.harness == agent) && (!active || terminal.running) }
-    public func keeps(_ session: SessionSummary) -> Bool { (agent == nil || session.harness == agent) && (!active || session.active) }
+    /// `now`: milliseconds, as a session's `updatedAt` is.
+    public func keeps(_ session: SessionSummary, now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> Bool {
+        (agent == nil || session.harness == agent) && (!active || session.active)
+            && (!recent || session.active || now - session.updatedAt <= Int64(Self.recentDays) * 86_400_000)
+    }
 
     /// `agent` alone; chosen again, every agent's.
-    public func choosing(_ agent: String) -> TerminalListFilter { TerminalListFilter(agent: self.agent == agent ? nil : agent, active: active) }
+    public func choosing(_ agent: String) -> TerminalListFilter { TerminalListFilter(agent: self.agent == agent ? nil : agent, active: active, recent: recent) }
 
     /// The agents to choose from, in the page's order: those with a terminal or a session in the list, and the one
     /// chosen even when nothing of its is left (so it can be taken off). None while there is one agent and no choice:

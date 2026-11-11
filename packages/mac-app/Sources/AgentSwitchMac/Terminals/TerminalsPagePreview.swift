@@ -68,6 +68,7 @@ enum TerminalsPagePreview {
         try await shot(to: file("terminals-search")) { $0.query = "登录" }
         try await shot(to: file("terminals-filter")) { $0.filter = TerminalListFilter(agent: "claude-code") }
         try await shot(to: file("terminals-filter-active")) { $0.filter = TerminalListFilter(active: true) }
+        try await shot(to: file("terminals-filter-recent")) { $0.filter = TerminalListFilter(recent: true) }
         try await shot(to: file("terminals-filter-none")) { $0.filter = TerminalListFilter(agent: "pi", active: true) }
         try await shot(to: file("terminals-sheet")) { model in
             Task { _ = await model.ask(TerminalSheet(title: "关闭「修登录页的跳转」？", body: "将结束 Claude Code 进程。会话记录保留，可稍后继续。", confirm: "Close", destructive: true, check: "同时删除会话记录（无法恢复）")) }

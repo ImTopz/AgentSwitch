@@ -87,6 +87,8 @@ struct TerminalsTab: View {
                         searchResults(TerminalSearch.run(folders, query: query, said: saidFor == query ? said : [:]))
                     }
                 }
+                // The page's width whatever is in it: a vertical scroll view is as wide as what it holds.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Theme.Space.l)
                 .padding(.vertical, Theme.Space.m)
             }

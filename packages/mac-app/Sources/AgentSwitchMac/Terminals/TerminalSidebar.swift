@@ -119,6 +119,7 @@ private struct SearchLine: View {
 
 /// Under the search line (2026-10-11, user: 这里要加上筛选某个agent的会话 和筛选活跃会话的功能): each agent's mark — one
 /// alone, clicked again every agent's — and `Active`: the terminals that run and the sessions being written now.
+/// `Recent` before it (2026-11-11): the open terminals and the sessions of the last few days.
 private struct FilterLine: View {
     let model: TerminalsModel
     @Environment(\.interfaceLook) private var look
@@ -133,15 +134,22 @@ private struct FilterLine: View {
                 }
             }
             Spacer(minLength: 6)
+            FilterMark(on: model.filter.recent, help: "Open Terminals and Sessions of the Last \(TerminalListFilter.recentDays) Days") {
+                model.filter.recent.toggle()
+            } label: { on in word("Recent", on: on) }
             FilterMark(on: model.filter.active, help: "Running Terminals and Sessions Being Written Now") {
                 model.filter.active.toggle()
-            } label: { on in
-                Text("Active").font(look.isClassic ? .system(size: 11, weight: on ? .semibold : .medium) : .system(size: 11.5, weight: on ? .bold : .regular, design: .monospaced))
-                    .foregroundStyle(on ? (look.isClassic ? Color.signal : Look.ink) : Look.ink2)
-                    .padding(.horizontal, look.isClassic ? 3 : 1)
-            }
+            } label: { on in word("Active", on: on) }
         }
         .padding(EdgeInsets(top: 0, leading: look.isClassic ? 10 : 12, bottom: look.isClassic ? 4 : 3, trailing: look.isClassic ? 10 : 12))
+    }
+}
+
+private extension FilterLine {
+    func word(_ text: String, on: Bool) -> some View {
+        Text(text).font(look.isClassic ? .system(size: 11, weight: on ? .semibold : .medium) : .system(size: 11.5, weight: on ? .bold : .regular, design: .monospaced))
+            .foregroundStyle(on ? (look.isClassic ? Color.signal : Look.ink) : Look.ink2)
+            .padding(.horizontal, look.isClassic ? 3 : 1)
     }
 }
 

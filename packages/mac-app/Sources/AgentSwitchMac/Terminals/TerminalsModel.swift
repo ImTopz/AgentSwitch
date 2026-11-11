@@ -85,6 +85,7 @@ final class TerminalsModel {
         didSet {
             defaults?.set(filter.agent, forKey: Keys.filterAgent)
             defaults?.set(filter.active, forKey: Keys.filterActive)
+            defaults?.set(filter.recent, forKey: Keys.filterRecent)
         }
     }
     /// The sessions whose words matched (`harness:id` → the words around the match), for the query `saidFor`.
@@ -182,7 +183,7 @@ final class TerminalsModel {
         static let agent = "terminals.agent", models = "terminals.models", mode = "terminals.mode", folder = "terminals.folder"
         static let efforts = "terminals.efforts"
         static let simple = "terminals.simple", simplePanes = "terminals.simplePanes"
-        static let filterAgent = "terminals.filterAgent", filterActive = "terminals.filterActive"
+        static let filterAgent = "terminals.filterAgent", filterActive = "terminals.filterActive", filterRecent = "terminals.filterRecent"
     }
 
     enum Side {
@@ -201,7 +202,8 @@ final class TerminalsModel {
         let width = defaults?.double(forKey: Keys.sideWidth) ?? 0
         sideWidth = width >= Double(Side.min) ? CGFloat(width) : Side.width
         collapsed = Set(defaults?.stringArray(forKey: Keys.collapsed) ?? [])
-        filter = TerminalListFilter(agent: defaults?.string(forKey: Keys.filterAgent), active: defaults?.bool(forKey: Keys.filterActive) ?? false)
+        filter = TerminalListFilter(agent: defaults?.string(forKey: Keys.filterAgent), active: defaults?.bool(forKey: Keys.filterActive) ?? false,
+                                    recent: defaults?.bool(forKey: Keys.filterRecent) ?? false)
         pickedAgent = defaults?.string(forKey: Keys.agent) ?? "claude-code"
         pickedModels = defaults?.dictionary(forKey: Keys.models) as? [String: String] ?? [:]
         pickedEfforts = defaults?.dictionary(forKey: Keys.efforts) as? [String: String] ?? [:]

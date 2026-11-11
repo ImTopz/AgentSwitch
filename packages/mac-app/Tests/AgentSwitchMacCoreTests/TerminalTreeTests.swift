@@ -56,6 +56,22 @@ final class TerminalTreeTests: XCTestCase {
         XCTAssertEqual(lines(TerminalTree.filtered(tree, by: TerminalListFilter(active: true))), ["WorkSpace/", "  A/", "    · t1", "    · t2", "  C/", "    · s3"])
         XCTAssertEqual(lines(TerminalTree.filtered(tree, by: TerminalListFilter(agent: "codex", active: true))), ["WorkSpace/", "  A/", "    · t2"])
         XCTAssertEqual(TerminalTree.filtered(tree, by: TerminalListFilter(agent: "pi")), [])
+        // What is recent (2026-11-11): every terminal listed, the sessions written within the last days, and one being
+        // written now whatever its time says.
+        let day: Int64 = 86_400_000, now = 10 * day
+        let aged = TerminalTree.build(terminals: terminals, sessions: [
+            SessionSummary(harness: "claude-code", id: "new", cwd: "\(w)/A", title: "new", updatedAt: now - 2 * day),
+            SessionSummary(harness: "codex", id: "edge", cwd: "\(w)/B", title: "edge", updatedAt: now - Int64(TerminalListFilter.recentDays) * day),
+            SessionSummary(harness: "codex", id: "old", cwd: "\(w)/B", title: "old", updatedAt: now - 4 * day),
+            SessionSummary(harness: "opencode", id: "busy", cwd: "\(w)/C", title: "busy", updatedAt: 1, active: true),
+            SessionSummary(harness: "opencode", id: "gone", cwd: "\(w)/D", title: "gone", updatedAt: 1)])
+        XCTAssertEqual(lines(TerminalTree.filtered(aged, by: TerminalListFilter(recent: true), now: now)),
+                       ["WorkSpace/", "  A/", "    · t1", "    · t2", "    · new", "  B/", "    · edge", "    deep/", "      · t3", "  C/", "    · busy"])
+        XCTAssertEqual(lines(TerminalTree.filtered(aged, by: TerminalListFilter(agent: "codex", recent: true), now: now)),
+                       ["WorkSpace/", "  A/", "    · t2", "  B/", "    · edge", "    deep/", "      · t3"])
+        XCTAssertEqual(lines(TerminalTree.filtered(aged, by: TerminalListFilter(active: true, recent: true), now: now)), ["WorkSpace/", "  A/", "    · t1", "    · t2", "  C/", "    · busy"])
+        XCTAssertTrue(TerminalListFilter(recent: true).isOn)
+        XCTAssertEqual(TerminalListFilter(recent: true).choosing("codex"), TerminalListFilter(agent: "codex", recent: true))
         // The folders that stay keep their names and their places.
         let nested = TerminalTree.filtered(tree, by: TerminalListFilter(agent: "codex")).first?.children.first { $0.name == "B" }
         XCTAssertEqual(nested?.children.map(\.name), ["deep"])

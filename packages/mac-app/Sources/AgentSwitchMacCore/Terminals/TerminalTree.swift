@@ -84,11 +84,11 @@ public enum TerminalTree {
     /// The tree with only what `filter` keeps: each folder's terminals and sessions that pass, and no folder left with
     /// nothing in it or under it. The folders that stay keep their places and their names, so nothing moves when the
     /// filter is put on or taken off.
-    public static func filtered(_ folders: [Folder], by filter: TerminalListFilter) -> [Folder] {
+    public static func filtered(_ folders: [Folder], by filter: TerminalListFilter, now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> [Folder] {
         guard filter.isOn else { return folders }
         return folders.compactMap { folder in
-            let terminals = folder.terminals.filter { filter.keeps($0) }, sessions = folder.sessions.filter { filter.keeps($0) }
-            let children = filtered(folder.children, by: filter)
+            let terminals = folder.terminals.filter { filter.keeps($0) }, sessions = folder.sessions.filter { filter.keeps($0, now: now) }
+            let children = filtered(folder.children, by: filter, now: now)
             guard !terminals.isEmpty || !sessions.isEmpty || !children.isEmpty else { return nil }
             return Folder(cwd: folder.cwd, name: folder.name, terminals: terminals, sessions: sessions, git: folder.git, children: children)
         }
