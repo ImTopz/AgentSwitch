@@ -28,10 +28,11 @@ struct UserBox: View {
                 // the accent's colour with white text until 2026-10-07, docs/ui-v0.md §8); the pixel look's a raised box.
                 TypedText(text: text, size: Look.typed, lineSpacing: 5)
                     .foregroundStyle(Look.ink)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, look.isClassic ? 8 : 9)
-                    .grounded(Look.said, radius: Look.bubbleRadius)
-                    .framed(look.isClassic ? Color.clear : Look.line, radius: Look.bubbleRadius)
+                    .padding(.horizontal, look.isClassic ? 14 : 13)
+                    .padding(.vertical, 9)
+                    // A box with round corners, not a capsule: one line of text in a radius of 15 was a pill.
+                    .grounded(Look.said, radius: Look.saidRadius)
+                    .framed(look.isClassic ? Color.clear : Look.line, radius: Look.saidRadius)
                     .opacity(faded ? 0.55 : 1)
                 if attached > 0 { Text("\(attached) attached").mono(11).foregroundStyle(Look.ink2) }
             }

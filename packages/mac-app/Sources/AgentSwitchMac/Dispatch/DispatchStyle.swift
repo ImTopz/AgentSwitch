@@ -24,7 +24,7 @@ enum Look {
     /// What you said, as its ground: the raised box of the pixel look; in the classic look a wash of the ink under
     /// ink text — as both agents' own desktop apps set a user's message (about 5% of the text's colour), no longer the
     /// accent's bubble with white text (docs/ui-v0.md §8, 2026-10-07).
-    static let said = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xE8E8EB, classicDark: 0x1F1F22, name: "AgentSwitchDispatchSaid"))
+    static let said = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xF0F0F1, classicDark: 0x1F1F22, name: "AgentSwitchDispatchSaid"))
 
     /// The highest thinking level's own colour (docs/terminal-v0.md §1 “滑块”, 2026-10-07): violet, and the deeper blue
     /// its line begins in. Nothing else is this colour.
@@ -82,6 +82,8 @@ enum Look {
     static let controlRadius: CGFloat = 6
     static let cardRadius: CGFloat = 10
     static let bubbleRadius: CGFloat = 15
+    /// What you said: a box with round corners.
+    static let saidRadius: CGFloat = 11
 }
 
 extension StatusLevel {

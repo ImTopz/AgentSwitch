@@ -305,9 +305,13 @@ private struct RecordRow: View {
         case .user:
             VStack(alignment: .trailing, spacing: 3) {
                 // Typed while it worked: it has not read it yet.
-                Text(item.queued ? "Queued" : TerminalListText.age(since: item.at, classic: look.isClassic)).mono(Look.size(10.5, look)).foregroundStyle(Look.faint)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                if !item.text.isEmpty { UserBox(text: item.text, faded: item.queued) }
+                // In the classic look only `Queued` stands over it; when it was said is under the pointer (2026-11-11:
+                // a time over every message was one more small grey line between each two turns).
+                if item.queued || !look.isClassic {
+                    Text(item.queued ? "Queued" : TerminalListText.age(since: item.at, classic: look.isClassic)).mono(Look.size(10.5, look)).foregroundStyle(Look.faint)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                if !item.text.isEmpty { UserBox(text: item.text, faded: item.queued).help(item.queued ? "" : TerminalListText.age(since: item.at, classic: look.isClassic)) }
                 if item.images > 0 {
                     if let source { RecordPictures(source: source, item: item.id, count: item.images) }
                     else { Text(item.images == 1 ? "1 image" : "\(item.images) images").mono(Look.size(10.5, look)).foregroundStyle(Look.ink2) }
@@ -346,9 +350,14 @@ private struct RecordRow: View {
             HStack(spacing: 8) {
                 Button { own(); open.toggle() } label: {
                     HStack(spacing: 6) {
-                        RecordFold(open: shown)
-                        Text(RecordDisplay.summary(item, running: running)).mono(Look.size(11.5, look)).foregroundStyle(Look.ink2).lineLimit(1)
+                        // In the classic look a line of the text's own size in grey, its chevron after it (2026-11-11,
+                        // 简略模式的美术风格用户反馈不好看: a small line with its chevron in front before).
+                        if !look.isClassic { RecordFold(open: shown) }
+                        Text(RecordDisplay.summary(item, running: running)).mono(look.isClassic ? Look.prose(look).size : Look.size(11.5, look)).foregroundStyle(Look.ink2).lineLimit(1)
                             .shimmer(running)
+                        if look.isClassic, !verbose, !steps.isEmpty {
+                            Image(systemName: shown ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(Look.faint)
+                        }
                         Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())
@@ -653,7 +662,8 @@ private struct RecordDock: View {
             }
             .grounded(Look.panel, radius: radius)
             .framed(Look.line, radius: radius)
-            .shadow(color: .black.opacity(look.isClassic ? 0.12 : 0), radius: 12, y: 4)
+            // A hairline and the faintest lift: a soft shadow all round before (2026-11-11).
+            .shadow(color: .black.opacity(look.isClassic ? 0.05 : 0), radius: 3, y: 1)
         }
         .frame(maxWidth: TerminalRecordPane.column, alignment: .leading)
         .padding(.horizontal, 24).padding(.top, Self.fade - 8).padding(.bottom, 14)
