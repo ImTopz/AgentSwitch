@@ -308,6 +308,8 @@
 - iPhone：`Settings › Proxies › Browser`，右边是 `Direct` 或出口；表单上面 `Exit`、`Fingerprint`（一行摘要，脚注“指纹在 Mac 上更换”），下面 `Server`、`User Name`、`Password`、`Apply`、`Direct`。没有 Camoufox 或 Mac 旧一些时（404 / 403）没有这一行。
 - 测试：服务 `tests/browserIdentity.test.ts`（手机看不到 `config`、改不了指纹、设得了也撤得了代理、明文密码 400、能重启）；Kit `ProxyTests`。看过的：模拟器里的演示（`-uiDemoScreen proxybrowser`）；真机没走过。
 
+**agent 自己的点击被当成“你接手了”**（2026-11-11，用户：现在有浏览器点击不生效的问题；点击不管用回车管用？）：带窗口的 Camoufox 里，页面里数“到达页面的输入”，服务每半秒读一次，数变大而当时没有 agent 的调用在进行，就算是人在窗口里动了手，标签页由 `mac-window` 接手，agent 的下一次调用等交还（最多两分钟）。但读数是半秒一次、还要等页面有空回答：一次 60 毫秒的点击早就结束了，它自己的 `pointerdown` 才被读到，于是被算成人的。现象是 agent 点完一次之后，下一次调用一直不返回；过两分钟接手自己到期，再发的调用（那次是回车）就成了。查实：运行中的服务里那个标签页是 `heldBy: mac-window`，挂着一个没返回的 agent 调用；`scripts/browser_click_probe.ts` 用真的 Camoufox 复现，四次点击四次都被接手，没人看串流时也一样（所以不是 30 帧的事，是带窗口以来就有的）。改法：调用结束后 1.5 秒内读到的输入仍算这次调用的（`host.ts` 的 `AGENT_INPUT_MS`）；这段时间里人恰好点了一下会漏掉一次，再动一下就算上。Mac 的 Browser 页现在画的是串流，窗口接手的标签页原来在这页上没有交还的入口，`⌘⇧T` 现在对它是交还。
+
 ## 8. 别的机器上看到的画面与操作框（2026-11-10）
 
 用户：浏览器在另一个机器上看的时候经常显示不全，然后标注agent点击操作的框很多时候也会错位，能不能一块全修了。

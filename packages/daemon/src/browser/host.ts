@@ -54,6 +54,12 @@ export function ownPortPatterns(ports: readonly number[]): string[] {
 const PICTURE_FRESH_MS = 2_000;
 /** Input the page reports within this of a screen's input is that screen's, not the person's in the window. */
 const FORWARDED_INPUT_MS = 600;
+/** Input seen in a page this soon after an agent's call ended is still that call's. The page's count is read twice a
+ *  second (camoufoxDriver `TOUCH_POLL_MS`), and the answer comes when the page gets round to it: a click that took
+ *  60 ms was over long before its own `pointerdown` was read, and was taken for the person's — the tab was then held
+ *  by the window and the agent's next call waited two minutes for a hand-back nobody knew to give (2026-11-11, user:
+ *  现在有浏览器点击不生效的问题; the tab read `heldBy: mac-window` with a call of the agent's waiting on it). */
+const AGENT_INPUT_MS = 1_500;
 export const HOLD_IDLE_MS = 2 * 60_000;
 /** Chrome is stopped after this long without a tab. */
 export const IDLE_CLOSE_MS = 10 * 60_000;
@@ -175,6 +181,8 @@ export class BrowserHost {
   /** Agents with a call under way that may point at the page (calls), or that finished one a moment ago (timer): their
    *  tabs are drawn at the CSS size meanwhile. By owner key. */
   private readonly acting = new Map<string, { calls: number; timer: NodeJS.Timeout | null }>();
+  /** When each owner's last call ended (`AGENT_INPUT_MS`). */
+  private readonly actedAt = new Map<string, number>();
   /** Tabs whose view Chrome changed, or may have, while a call of their agent's was under way (`strayed`): drawn again
    *  when the agent's calls are over. */
   private readonly unsure = new Set<string>();
@@ -353,6 +361,7 @@ export class BrowserHost {
     const rt = this.runtimes.get(id);
     if (!state || !rt || state.owner.kind === "you" || !rt.page.windowed?.()) return;
     if ((this.acting.get(ownerKey(state.owner))?.calls ?? 0) > 0) return;
+    if (this.now() - (this.actedAt.get(ownerKey(state.owner)) ?? -Infinity) < AGENT_INPUT_MS) return;
     if (this.now() - rt.forwardedAt < FORWARDED_INPUT_MS) return;
     if (state.heldBy === WINDOW_HOLDER) this.armHold(id, WINDOW_HOLDER);
     else if (state.heldBy === null) { this.take(id, WINDOW_HOLDER); this.opts.onWindowTake?.(id); }
@@ -465,6 +474,7 @@ export class BrowserHost {
     const entry = this.acting.get(key);
     if (!entry) return;
     const calls = Math.max(0, entry.calls - 1);
+    this.actedAt.set(key, this.now());
     if (entry.timer) clearTimeout(entry.timer);
     const timer = calls > 0 ? null : setTimeout(() => {
       this.acting.delete(key);

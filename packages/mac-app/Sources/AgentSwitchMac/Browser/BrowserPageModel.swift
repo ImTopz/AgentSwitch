@@ -618,6 +618,9 @@ final class BrowserPageModel {
     /// `[ Take Over ]` for an agent's tab or one held elsewhere; nothing for your own tab on this screen.
     func hold() async {
         guard let tab = current else { return }
+        // The page draws the stream, the tab still has its window: one held from that window is handed back from here
+        // too (2026-11-11: with the stream on the page there was no way to, and the agent waited the hold out).
+        if !windows, ownWindows, tab.heldBy == BrowserDefaults.windowScreen { await handBackWindow(); return }
         if windows {
             if BrowserWindowText.state(tab) == .steppedIn { await handBackWindow() }
             return

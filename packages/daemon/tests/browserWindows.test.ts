@@ -124,6 +124,22 @@ describe("input in an agent's window (§7.2 第 4 条)", () => {
     expect(host.get(tab.id)?.heldBy).toBe("phone-1");
   });
 
+  it("is still the agent's just after its call ended: the page's count is read late (2026-11-11)", async () => {
+    vi.useFakeTimers();
+    const { host, driver } = make(true);
+    const tab = await host.open(CODEX, "https://example.com/");
+    await host.agentActing(CODEX);
+    host.agentDone(CODEX);
+    // The click's own `pointerdown`, read half a second after the click was over.
+    await vi.advanceTimersByTimeAsync(500);
+    driver.page().touch();
+    expect(host.get(tab.id)?.heldBy).toBeNull();
+    // Two seconds on nothing of the agent's is under way: this is the person.
+    await vi.advanceTimersByTimeAsync(2_000);
+    driver.page().touch();
+    expect(host.get(tab.id)?.heldBy).toBe(WINDOW_HOLDER);
+  });
+
   it("means nothing in the person's own tab, and nothing where pages have no windows", async () => {
     const { host, driver } = make(true);
     const mine = await host.open(YOU, "https://example.com/");
